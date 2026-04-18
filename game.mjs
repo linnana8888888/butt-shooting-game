@@ -653,6 +653,14 @@ function updateGame(dt, now) {
   if (!p) return;
   updateMouseWorld();
 
+  // Hard pause while any picker modal is open — user is reading/choosing.
+  // We still refresh the HUD so the player sees current stats on the upgrade
+  // screen, but nothing moves, nothing fires, no contact damage applies.
+  if (game.picker.isOpen()) {
+    renderHud();
+    return;
+  }
+
   // — player movement
   const { ix, iz } = readMoveInput(keys);
   const speedBoost = (game.stats?.speedMult ?? 1);
@@ -665,15 +673,18 @@ function updateGame(dt, now) {
     p.vx *= 0.5; p.vz *= 0.5;
   }
   p.obj.position.set(p.x, 0, p.z);
-  p.obj.rotation.y = p.rot;
 
   if (p.iFrames > 0) p.iFrames -= dt;
   if (game.dashCooldown > 0) game.dashCooldown -= dt;
   if (game.stompCd > 0) game.stompCd -= dt;
   updateReload(p, dt);
 
-  // — camera
+  // — camera (updates aim from mouse)
   game.cam.update(p, mouse.world);
+
+  // rotate butt to face AIM, not movement — so beans visibly shoot forward
+  p.rot = Math.atan2(-p.aimX, -p.aimZ);
+  p.obj.rotation.y = p.rot;
 
   // — firing (held)
   if (firing) fireNow();
@@ -1108,8 +1119,10 @@ function startGame() {
   game.state = 'play';
   hud.titleHi.textContent = game.hiScore;
 
-  // modifier roulette before the run actually begins
-  startLevelWithModifier(0, 'Pick a Run Modifier');
+  // Level 0 starts immediately so player can see the world and move.
+  // Modifier picker only runs between levels (1, 2).
+  enterLevel(0);
+  showBanner('GET READY — MOVE WITH WASD');
   game.analytics.emit('start', { hi: game.hiScore });
 }
 
@@ -1127,6 +1140,8 @@ function startLevelWithModifier(idx, title = 'Pick a Modifier') {
     }
     enterLevel(idx);
     showBanner('GET READY — MOVE WITH WASD');
+    // return focus to the canvas/doc so WASD works
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   }, { color: '#5FD9FF' });
 }
 
@@ -1150,6 +1165,7 @@ function onXpLevelUp(level) {
       new THREE.Vector3(game.player.x, 3, game.player.z),
       `+${choice.name.toUpperCase()}`, '#FFD24D', true,
     );
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   }, { color: '#FFD24D' });
 }
 
