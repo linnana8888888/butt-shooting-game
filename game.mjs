@@ -13,6 +13,11 @@ import {
 import { buildButt, makePlayer, tryShoot, startReload, updateReload, readMoveInput, applyMove } from './player.mjs';
 import { createCamera } from './camera.mjs';
 import { createAnalytics } from './analytics.mjs';
+import {
+  createStats, createXp,
+  pickThreeUpgrades, pickThreeModifiers, applyUpgrade,
+  createPicker, buildGemMesh,
+} from './upgrades.mjs';
 
 // ─── shared palette + constants ───────────────────────────────────────────────
 const C = {
@@ -206,8 +211,14 @@ export const game = {
   hiScore: 0,
   boss: null,
   rain: { timer: 30 },
+  // v4
+  stompCd: 0,
+  gems: [],
+  stats: null, xp: null,
+  pendingModifier: false,
   // systems wired below
   sfx: null, floaters: null, combo: null, powerups: null, analytics: null, cam: null,
+  picker: null,
 };
 
 // ─── HUD refs ─────────────────────────────────────────────────────────────────
@@ -228,6 +239,11 @@ const hud = {
   bosshp: document.getElementById('bosshp'),
   floaters: document.getElementById('floaters'),
   banner: document.getElementById('levelBanner'),
+  xpwrap: document.getElementById('xpwrap'),
+  xpbar: document.getElementById('xpbar'),
+  stompChip: document.getElementById('stompChip'),
+  stompCount: document.getElementById('stompCount'),
+  clouds: document.getElementById('clouds'),
   titleOverlay: document.getElementById('title'),
   titleHi: document.getElementById('titleHi'),
   goOverlay: document.getElementById('gameover'),
@@ -249,7 +265,36 @@ game.combo     = createCombo({ windowSec: 2.0 });
 game.analytics = createAnalytics(hud.devpanel, hud.devstats, hud.devevents);
 game.hiScore   = game.analytics.loadHiScore();
 game.cam       = createCamera(camera, canvas);
-// powerups wired after player exists
+game.picker    = createPicker(document.body);
+// powerups / stats / xp wired after player exists
+
+// ─── clouds (2D parallax layer) ───────────────────────────────────────────────
+buildClouds(hud.clouds);
+
+function buildClouds(root) {
+  if (!root) return;
+  root.innerHTML = '';
+  const n = 6;
+  for (let i = 0; i < n; i++) {
+    const el = document.createElement('div');
+    el.className = 'cloud';
+    const size = 60 + Math.random() * 90;
+    el.style.width  = `${size}px`;
+    el.style.height = `${size * 0.55}px`;
+    el.style.top    = `${4 + Math.random() * 32}%`;
+    const startX = Math.random() * 100;
+    el.style.left   = `${startX}%`;
+    const dur = 60 + Math.random() * 50;
+    el.style.transition = `transform ${dur}s linear`;
+    root.appendChild(el);
+    // drift
+    const drift = () => {
+      el.style.transform = `translateX(${Math.random() > 0.5 ? '' : '-'}40vw)`;
+    };
+    requestAnimationFrame(drift);
+    setInterval(drift, dur * 1000);
+  }
+}
 
 // ─── input state ──────────────────────────────────────────────────────────────
 const keys = {};
@@ -274,6 +319,9 @@ document.addEventListener('keydown', e => {
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
     if (game.state === 'play') tryDash();
   }
+  if (e.code === 'KeyQ') {
+    if (game.state === 'play') tryStomp();
+  }
   if (e.code === 'KeyV') {
     if (game.state === 'play') {
       const m = game.cam.cycle();
@@ -289,6 +337,19 @@ document.addEventListener('keydown', e => {
   }
   if (e.code === 'Escape') {
     if (game.cam.mode() === 'fps') game.cam.exitPointerLock();
+  }
+  // FPS sensitivity live-tune: [ slower, ] faster
+  if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
+    if (game.cam.mode() === 'fps' && game.cam.sensUp) {
+      const s = e.code === 'BracketRight' ? game.cam.sensUp() : game.cam.sensDown();
+      if (game.player && game.floaters) {
+        game.floaters.spawn(
+          new THREE.Vector3(game.player.x, 3, game.player.z),
+          `SENS ${(s * 1000).toFixed(1)}`,
+          '#FFD25A', true,
+        );
+      }
+    }
   }
 });
 document.addEventListener('keyup', e => {
@@ -336,9 +397,10 @@ document.getElementById('winRestart').addEventListener('click', startGame);
 function fireNow() {
   const p = game.player;
   if (!p || game.state !== 'play') return;
+  if (game.picker.isOpen()) return; // game is paused for a pick
   const now = performance.now() / 1000;
-  // rate limit
-  const minCadence = 0.15;
+  // rate limit (scaled by upgrades + modifiers)
+  const minCadence = 0.15 * (game.stats?.cadenceMult ?? 1);
   if (now - game.lastShot < minCadence) return;
   const shot = tryShoot(p, now, minCadence);
   if (!shot) return;
@@ -348,16 +410,19 @@ function fireNow() {
   // mega = 3x damage on next few shots
   const megaActive = game.powerups.megaShotsLeft() > 0;
   if (megaActive) game.powerups.consumeMega();
-  const dmg = megaActive ? 3 : 1;
+  const baseDmg = megaActive ? 3 : 1;
+  const dmg = baseDmg * (game.stats?.dmgMult ?? 1);
 
-  // triple = fan of 3
+  // spread: base 1 + extraShots from upgrades; also widens if triple power-up
   const triple = game.powerups.isActive('triple');
-  const spread = triple ? [-0.17, 0, 0.17] : [0];
+  const count = (triple ? 3 : 1) + (game.stats?.extraShots ?? 0);
+  const spread = fanAngles(count);
+  const beanScale = game.stats?.beanScale ?? 1;
   for (const ang of spread) {
     const cos = Math.cos(ang), sin = Math.sin(ang);
     const ax = p.aimX * cos - p.aimZ * sin;
     const az = p.aimX * sin + p.aimZ * cos;
-    spawnBean(p.x, p.z, ax, az, dmg);
+    spawnBean(p.x, p.z, ax, az, dmg, beanScale);
   }
 
   // recoil
@@ -368,8 +433,9 @@ function fireNow() {
   sfx.shot();
 }
 
-function spawnBean(x, z, ax, az, dmg) {
+function spawnBean(x, z, ax, az, dmg, scaleMult = 1) {
   const bean = buildBean(C.beanGold);
+  if (scaleMult !== 1) bean.scale.setScalar(scaleMult);
   bean.position.set(x, 0.8, z);
   scene.add(bean);
   game.projectiles.push({
@@ -377,6 +443,16 @@ function spawnBean(x, z, ax, az, dmg) {
     vx: ax * 30, vz: az * 30,
     life: 1.0, damage: dmg,
   });
+}
+
+// Produce N symmetric angles for a fan spread.
+function fanAngles(n) {
+  if (n <= 1) return [0];
+  const step = 0.14;
+  const out = [];
+  const mid = (n - 1) / 2;
+  for (let i = 0; i < n; i++) out.push((i - mid) * step);
+  return out;
 }
 
 function spawnEnemyBean(x, z, ax, az, speed, damage) {
@@ -388,6 +464,51 @@ function spawnEnemyBean(x, z, ax, az, speed, damage) {
     vx: ax * speed, vz: az * speed,
     life: 3.5, damage,
   });
+}
+
+function tryStomp() {
+  const p = game.player;
+  if (!p || game.stompCd > 0) return;
+  const s = game.stats;
+  if (!s || s.stompStock <= 0) return;
+  s.stompStock -= 1;
+  game.stompCd = 3.5;
+  p.iFrames = Math.max(p.iFrames, 0.4);
+  const RADIUS = 5.5;
+  const DMG = 6 * (s.dmgMult ?? 1);
+  // AOE damage
+  for (let i = game.enemies.length - 1; i >= 0; i--) {
+    const e = game.enemies[i];
+    const dx = e.obj.position.x - p.x;
+    const dz = e.obj.position.z - p.z;
+    const dd = dx * dx + dz * dz;
+    if (dd < RADIUS * RADIUS) {
+      e.hp -= DMG;
+      const d = Math.sqrt(dd) || 1;
+      e.obj.position.x += (dx / d) * 1.6;
+      e.obj.position.z += (dz / d) * 1.6;
+      spawnPoof(e.obj.position.x, e.obj.position.z, C.impact, 3);
+      if (e.hp <= 0) killEnemy(i);
+    }
+  }
+  // also chip boss
+  if (game.boss) {
+    const bo = game.boss.obj.position;
+    const dx = bo.x - p.x, dz = bo.z - p.z;
+    if (dx * dx + dz * dz < (RADIUS + 1.5) ** 2) {
+      game.boss.ref.hp -= DMG * 1.5;
+      updateBossHud();
+      if (game.boss.ref.hp <= 0) killBoss();
+    }
+  }
+  // big shockwave visual
+  spawnPoof(p.x, p.z, 0xFFD24D, 22);
+  spawnPoof(p.x, p.z, 0xFFFFFF, 10);
+  game.floaters.spawn(
+    new THREE.Vector3(p.x, 3, p.z), 'STOMP!', '#FFD24D', true,
+  );
+  sfx.dash();
+  game.analytics.emit('stomp');
 }
 
 function tryDash() {
@@ -468,7 +589,9 @@ function spawnEnemyForLevel() {
   const r = ARENA - 3;
   enemy.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
   scene.add(enemy);
-  game.enemies.push({ obj: enemy, kind, hp: enemy.userData.stats.hp, stats: enemy.userData.stats });
+  const hpMult = game.stats?.enemyHpMult ?? 1;
+  const hp = enemy.userData.stats.hp * hpMult;
+  game.enemies.push({ obj: enemy, kind, hp, stats: enemy.userData.stats });
 }
 
 function spawnBoss() {
@@ -485,7 +608,8 @@ function spawnBoss() {
 
 // ─── drop logic ───────────────────────────────────────────────────────────────
 function maybeDropFromEnemy(x, z, stats) {
-  const chance = stats.dropChance || 0.2;
+  const mult = game.stats?.dropMult ?? 1;
+  const chance = Math.min(1, (stats.dropChance || 0.2) * mult);
   if (Math.random() > chance) return;
   const roll = Math.random();
   let kind;
@@ -531,7 +655,8 @@ function updateGame(dt, now) {
 
   // — player movement
   const { ix, iz } = readMoveInput(keys);
-  applyMove(p, ix, iz, p.baseSpeed, dt);
+  const speedBoost = (game.stats?.speedMult ?? 1);
+  applyMove(p, ix, iz, p.baseSpeed * speedBoost, dt);
   // arena clamp
   const dFromC = Math.hypot(p.x, p.z);
   if (dFromC > ARENA - 1) {
@@ -544,6 +669,7 @@ function updateGame(dt, now) {
 
   if (p.iFrames > 0) p.iFrames -= dt;
   if (game.dashCooldown > 0) game.dashCooldown -= dt;
+  if (game.stompCd > 0) game.stompCd -= dt;
   updateReload(p, dt);
 
   // — camera
@@ -680,6 +806,39 @@ function updateGame(dt, now) {
     }
   }
 
+  // — xp gems: magnet pull within range, collect on contact
+  const magnet = (game.stats?.magnetRange ?? 1.1);
+  const magnetSq = magnet * magnet;
+  const GRAB_SQ = 0.8 * 0.8;
+  for (let i = game.gems.length - 1; i >= 0; i--) {
+    const g = game.gems[i];
+    g.t += dt; g.life -= dt;
+    g.obj.rotation.y = g.t * 2;
+    const dx = p.x - g.x, dz = p.z - g.z;
+    const dsq = dx * dx + dz * dz;
+    if (dsq < magnetSq || g.grabbed) {
+      g.grabbed = true;
+      const d = Math.sqrt(dsq) || 1;
+      const pull = 14;
+      g.x += (dx / d) * pull * dt;
+      g.z += (dz / d) * pull * dt;
+    }
+    g.obj.position.set(g.x, 0.35 + Math.sin(g.t * 6) * 0.08, g.z);
+    if (dsq < GRAB_SQ) {
+      game.xp.grant(g.value);
+      game.score += g.value;
+      sfx.pickup();
+      scene.remove(g.obj);
+      g.obj.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+      game.gems.splice(i, 1);
+      game.analytics.emit('gem', { value: g.value });
+    } else if (g.life <= 0) {
+      scene.remove(g.obj);
+      g.obj.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+      game.gems.splice(i, 1);
+    }
+  }
+
   // — combo decay + systems
   game.combo.decay(dt);
   game.powerups.update(dt);
@@ -687,8 +846,8 @@ function updateGame(dt, now) {
   // — bean rain
   beanRainTick(game, dt, dropBeanPickup);
 
-  // — wave logic (pre-boss)
-  if (!game.boss && game.state === 'play') {
+  // — wave logic (pre-boss) — pause while picker modal is open
+  if (!game.boss && game.state === 'play' && !game.picker.isOpen()) {
     game.waveTimer -= dt;
     if (game.waveTimer <= 0 && game.enemies.length < game.enemyCap) {
       spawnEnemyForLevel();
@@ -722,6 +881,20 @@ function renderHud() {
   hud.comboTimer.style.width = `${Math.max(0, Math.min(100, (cs.timer / 2.0) * 100))}%`;
 
   game.powerups.renderHud();
+
+  // v4 — xp bar
+  if (game.xp && hud.xpbar) {
+    const snap = game.xp.snapshot();
+    hud.xpbar.style.width = `${Math.max(0, Math.min(100, snap.frac * 100))}%`;
+    hud.xpwrap.setAttribute('data-lv', `LV ${snap.level}`);
+  }
+
+  // v4 — stomp chip state
+  if (hud.stompChip && game.stats) {
+    const ready = game.stompCd <= 0 && game.stats.stompStock > 0;
+    hud.stompChip.classList.toggle('cooldown', !ready);
+    hud.stompCount.textContent = game.stats.stompStock;
+  }
 }
 
 function updateBossHud() {
@@ -741,10 +914,15 @@ function killEnemy(idx) {
   // combo
   const cRes = game.combo.hit();
   const baseScore = e.stats.score || 10;
-  const gained = baseScore * cRes.mult;
+  const scoreMult = game.stats?.scoreMult ?? 1;
+  const gained = Math.round(baseScore * cRes.mult * scoreMult);
   game.score += gained;
   game.killsInLevel += 1;
   game.analytics.emit('kill', { kind: e.kind, gained, score: game.score });
+
+  // xp gem: value scales with enemy score tier; 1 / 2 / 5
+  const tier = baseScore >= 20 ? 5 : (baseScore >= 15 ? 2 : 1);
+  spawnGem(ex, ez, tier);
 
   // floater
   const pos = new THREE.Vector3(ex, 1.5, ez);
@@ -786,7 +964,8 @@ function nextLevel() {
   }
   // heal partially
   if (game.player) game.player.hp = Math.min(game.player.maxHp, game.player.hp + 30);
-  enterLevel(nextIdx);
+  // modifier roulette before next level starts
+  startLevelWithModifier(nextIdx, 'Pick a Modifier');
 }
 
 function killBoss() {
@@ -881,22 +1060,26 @@ function resetScene() {
   for (const b of game.enemyBeans) scene.remove(b.obj);
   for (const p of game.pickups) scene.remove(p.obj);
   for (const d of game.poofs) scene.remove(d.obj);
+  for (const g of game.gems) scene.remove(g.obj);
   if (game.boss) scene.remove(game.boss.obj);
   game.enemies.length = 0;
   game.projectiles.length = 0;
   game.enemyBeans.length = 0;
   game.pickups.length = 0;
   game.poofs.length = 0;
+  game.gems.length = 0;
   game.boss = null;
 }
 
 function startGame() {
   sfx.init();
   resetScene();
+  resetGems();
   hud.titleOverlay.classList.add('hide');
   hud.goOverlay.classList.add('hide');
   hud.winOverlay.classList.add('hide');
   hud.bossbar.classList.remove('show');
+  game.picker.hide();
 
   // player
   if (!game.playerObj) {
@@ -908,18 +1091,78 @@ function startGame() {
 
   game.powerups = createPowerups(game.player, hud.buffs);
 
+  // v4 stats + xp must exist before enterLevel so HUD renders right.
+  game.stats = createStats();
+  game.xp = createXp({ onLevelUp: onXpLevelUp });
+  game.stompCd = 0;
+
   game.score = 0;
   game.levelIdx = 0;
   game.killsInLevel = 0;
-  game.waveTimer = 1.5;
+  // 3.2s warm-up so the player can get oriented, test movement, and feel
+  // agency before the first enemy appears. Subsequent waves use 0.6–1.5s.
+  game.waveTimer = 3.2;
   game.dashCooldown = 0;
   game.combo.reset();
   game.rain.timer = 30;
   game.state = 'play';
   hud.titleHi.textContent = game.hiScore;
 
-  enterLevel(0);
+  // modifier roulette before the run actually begins
+  startLevelWithModifier(0, 'Pick a Run Modifier');
   game.analytics.emit('start', { hi: game.hiScore });
+}
+
+// Show modifier picker, then enter the named level once user picks.
+function startLevelWithModifier(idx, title = 'Pick a Modifier') {
+  const choices = pickThreeModifiers();
+  game.picker.show(title, choices, (choice) => {
+    choice.apply(game.stats);
+    game.analytics.emit('modifier', { id: choice.id, level: idx });
+    if (game.player) {
+      game.floaters.spawn(
+        new THREE.Vector3(game.player.x, 3, game.player.z),
+        choice.name.toUpperCase(), '#5FD9FF', true,
+      );
+    }
+    enterLevel(idx);
+    showBanner('GET READY — MOVE WITH WASD');
+  }, { color: '#5FD9FF' });
+}
+
+function onXpLevelUp(level) {
+  // pause-by-modal: picker gates fire + stomp
+  const choices = pickThreeUpgrades(game.stats);
+  if (choices.length === 0) {
+    // all upgrades maxed — just announce
+    sfx.levelUp();
+    game.floaters.spawn(
+      new THREE.Vector3(game.player.x, 3, game.player.z),
+      `LV ${level}!`, '#FFD24D', true,
+    );
+    return;
+  }
+  sfx.levelUp();
+  game.picker.show(`LEVEL UP — LV ${level}`, choices, (choice) => {
+    applyUpgrade(game.stats, choice, game.player);
+    game.analytics.emit('upgrade', { id: choice.id, level });
+    game.floaters.spawn(
+      new THREE.Vector3(game.player.x, 3, game.player.z),
+      `+${choice.name.toUpperCase()}`, '#FFD24D', true,
+    );
+  }, { color: '#FFD24D' });
+}
+
+function resetGems() {
+  for (const g of game.gems) scene.remove(g.obj);
+  game.gems.length = 0;
+}
+
+function spawnGem(x, z, value = 1) {
+  const mesh = buildGemMesh(THREE, value);
+  mesh.position.set(x, 0, z);
+  scene.add(mesh);
+  game.gems.push({ obj: mesh, x, z, value, t: 0, life: 25, grabbed: false });
 }
 
 // ─── dev hooks for playtest ───────────────────────────────────────────────────

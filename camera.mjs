@@ -9,6 +9,15 @@ export function createCamera(cameraObj, canvasEl) {
   const yawMin = -Infinity, yawMax = Infinity;
   const pitchMin = -0.9, pitchMax = 0.5;
 
+  // FPS mouse sensitivity (radians per px). Default roughly 2.5× the old value
+  // — old 0.002 was too slow for tracking enemies. Bracket keys adjust live.
+  const SENS_MIN = 0.002, SENS_MAX = 0.012, SENS_STEP = 0.0008;
+  let fpsSens = 0.0052;
+  try {
+    const s = parseFloat(localStorage.getItem('bsg_fps_sens') || '');
+    if (Number.isFinite(s) && s >= SENS_MIN && s <= SENS_MAX) fpsSens = s;
+  } catch {}
+
   // restore saved mode
   try {
     const saved = localStorage.getItem('bsg_cam');
@@ -46,10 +55,16 @@ export function createCamera(cameraObj, canvasEl) {
   function onMouseMove(e) {
     if (MODES[modeIdx] !== 'fps') return;
     if (document.pointerLockElement !== canvasEl) return;
-    yaw   -= e.movementX * 0.002;
-    pitch -= e.movementY * 0.002;
+    yaw   -= e.movementX * fpsSens;
+    pitch -= e.movementY * fpsSens;
     if (pitch < pitchMin) pitch = pitchMin;
     if (pitch > pitchMax) pitch = pitchMax;
+  }
+
+  function adjustSens(delta) {
+    fpsSens = Math.max(SENS_MIN, Math.min(SENS_MAX, fpsSens + delta));
+    try { localStorage.setItem('bsg_fps_sens', String(fpsSens)); } catch {}
+    return fpsSens;
   }
 
   // Returns {aimX, aimZ} unit vector in world XZ based on current camera mode.
@@ -128,5 +143,9 @@ export function createCamera(cameraObj, canvasEl) {
     enterPointerLock, exitPointerLock,
     getYaw: () => yaw,
     getPitch: () => pitch,
+    getSens: () => fpsSens,
+    sensUp: () => adjustSens(SENS_STEP),
+    sensDown: () => adjustSens(-SENS_STEP),
+    SENS_STEP,
   };
 }
