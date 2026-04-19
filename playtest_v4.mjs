@@ -1,4 +1,4 @@
-import { chromium } from '/Users/dknanlin/.claude/skills/email-digest/node_modules/playwright/index.mjs';
+import { chromium } from '/Users/dknanlin/.claude/skills/digest/node_modules/playwright/index.mjs';
 import { mkdirSync } from 'fs';
 
 const OUT = '/Users/dknanlin/scratch/butt-shooting-game/qa';
@@ -11,7 +11,7 @@ function fail(n, e) { results.push({ n, ok: false, e: String(e) }); console.erro
 
 const browser = await chromium.launch({
   headless: true,
-  executablePath: '/Users/dknanlin/Library/Caches/ms-playwright/chromium-1217/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+  executablePath: '/Users/dknanlin/Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
   args: [
     '--use-gl=angle',
     '--use-angle=swiftshader',

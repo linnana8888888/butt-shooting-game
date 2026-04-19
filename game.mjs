@@ -18,6 +18,8 @@ import {
   pickThreeUpgrades, pickThreeModifiers, applyUpgrade,
   createPicker, buildGemMesh,
 } from './upgrades.mjs';
+import { createSpawnScheduler } from './spawn_scheduler.mjs';
+import { createBeaconRenderer } from './beacon_renderer.mjs';
 
 // ─── shared palette + constants ───────────────────────────────────────────────
 const C = {
@@ -143,6 +145,67 @@ function buildEnemyByKind(kind) {
   return buildFlusher();
 }
 
+// ─── artist-idea-03: 3-tier outfit overlay (hat / armor trim / aura) ──────────
+// Purely additive cosmetics — does not touch baseline geometry or stats. Tier
+// probability ramps with level so early game stays iconic and later levels
+// get visual variety without changing silhouettes.
+const OUTFIT = {
+  hat:   { color: 0x5FD9FF, yOffset: 0.95 },
+  armor: { color: 0xFFD24D, radius: 0.55 },
+  aura:  { color: 0xFF5FA2, radius: 0.8, opacity: 0.35 },
+};
+function pickOutfitTier(levelIdx) {
+  // tier 0 = vanilla. As level climbs, probability of tier 1–3 rises.
+  const roll = Math.random();
+  const bias = Math.min(0.7, 0.12 + (levelIdx | 0) * 0.15);
+  if (roll > bias) return 0;
+  const inner = Math.random();
+  if (inner < 0.55) return 1;   // hat only
+  if (inner < 0.9)  return 2;   // hat + armor
+  return 3;                      // hat + armor + aura
+}
+function applyOutfit(record) {
+  const tier = pickOutfitTier(game.levelIdx ?? 0);
+  record.outfitTier = tier;
+  if (!tier) return;
+  const g = record.obj;
+  const mkHat = () => {
+    const hat = new THREE.Mesh(
+      new THREE.ConeGeometry(0.22, 0.32, 10),
+      toon(OUTFIT.hat.color),
+    );
+    hat.position.y = OUTFIT.hat.yOffset;
+    hat.userData.__outfit = true;
+    g.add(hat);
+  };
+  const mkArmor = () => {
+    const trim = new THREE.Mesh(
+      new THREE.TorusGeometry(OUTFIT.armor.radius, 0.05, 6, 18),
+      toon(OUTFIT.armor.color),
+    );
+    trim.rotation.x = Math.PI / 2;
+    trim.position.y = 0.3;
+    trim.userData.__outfit = true;
+    g.add(trim);
+  };
+  const mkAura = () => {
+    const aura = new THREE.Mesh(
+      new THREE.SphereGeometry(OUTFIT.aura.radius, 12, 8),
+      new THREE.MeshBasicMaterial({
+        color: OUTFIT.aura.color,
+        transparent: true,
+        opacity: OUTFIT.aura.opacity,
+      }),
+    );
+    aura.position.y = 0.4;
+    aura.userData.__outfit = true;
+    g.add(aura);
+  };
+  if (tier >= 1) mkHat();
+  if (tier >= 2) mkArmor();
+  if (tier >= 3) mkAura();
+}
+
 // ─── bean projectile ──────────────────────────────────────────────────────────
 function buildBean(color = C.beanGold) {
   const g = new THREE.Group();
@@ -219,6 +282,12 @@ export const game = {
   // systems wired below
   sfx: null, floaters: null, combo: null, powerups: null, analytics: null, cam: null,
   picker: null,
+  spawnScheduler: null,
+  beacon: null,
+  // healthkit_breadcrumb_beacon
+  healthKits: [],
+  healthKitSpawnCd: 22,
+  healthKitPityArmed: false,
 };
 
 // ─── HUD refs ─────────────────────────────────────────────────────────────────
@@ -266,6 +335,10 @@ game.analytics = createAnalytics(hud.devpanel, hud.devstats, hud.devevents);
 game.hiScore   = game.analytics.loadHiScore();
 game.cam       = createCamera(camera, canvas);
 game.picker    = createPicker(document.body);
+game.spawnScheduler = createSpawnScheduler({
+  emit: (t, d) => game.analytics && game.analytics.emit(t, d),
+});
+game.beacon = createBeaconRenderer(hud.floaters, camera);
 // powerups / stats / xp wired after player exists
 
 // ─── clouds (2D parallax layer) ───────────────────────────────────────────────
@@ -561,6 +634,7 @@ function enterLevel(idx) {
   sfx.startMusic(cfg.musicIdx);
   sfx.waveStart();
   game.analytics.emit('levelStart', { level: idx, name: cfg.name });
+  if (game.spawnScheduler) game.spawnScheduler.startWarmup(idx);
 }
 
 function showBanner(text) {
@@ -591,7 +665,35 @@ function spawnEnemyForLevel() {
   scene.add(enemy);
   const hpMult = game.stats?.enemyHpMult ?? 1;
   const hp = enemy.userData.stats.hp * hpMult;
-  game.enemies.push({ obj: enemy, kind, hp, stats: enemy.userData.stats });
+  const record = { obj: enemy, kind, hp, stats: enemy.userData.stats };
+  applyOutfit(record);
+  game.enemies.push(record);
+}
+
+// Warmup dummies use stripped-down stats so level 0 doesn't feel empty. The
+// spawn_scheduler owns cadence; this just builds + injects the enemy record.
+function spawnWarmupDummy(spec) {
+  const enemy = buildEnemyByKind(spec.kind || 'flusher');
+  const baseStats = { ...enemy.userData.stats };
+  baseStats.hp = spec.hp ?? 1;
+  baseStats.damage = spec.damage ?? 6;
+  baseStats.dropChance = 0.1;
+  enemy.userData.stats = baseStats;
+  // closer spawn than arena edge — keeps first-kill moment punchy
+  const a = Math.random() * Math.PI * 2;
+  const r = 6 + Math.random() * 4;
+  enemy.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+  scene.add(enemy);
+  const record = {
+    obj: enemy,
+    kind: spec.kind || 'flusher',
+    hp: baseStats.hp,
+    stats: baseStats,
+    tag: spec.tag || 'warmup_dummy',
+  };
+  applyOutfit(record);
+  game.enemies.push(record);
+  return record;
 }
 
 function spawnBoss() {
@@ -628,7 +730,77 @@ function dropPickup(x, z, kind, amount = 1) {
   const mesh = buildPickupMesh(kind);
   mesh.position.set(x, 0, z);
   scene.add(mesh);
-  game.pickups.push({ obj: mesh, x, z, kind, amount, t: 0, life: 12 });
+  const pk = { obj: mesh, x, z, kind, amount, t: 0, life: 12 };
+  game.pickups.push(pk);
+  return pk;
+}
+
+// ─── healthkit breadcrumb (idea: healthkit_breadcrumb_beacon) ─────────────────
+let _healthKitSeq = 0;
+function spawnHealthKit(source = 'cadence') {
+  // Place kit at arena edge but biased away from player so it feels earned.
+  const p = game.player;
+  const ox = p ? p.x : 0;
+  const oz = p ? p.z : 0;
+  let bestX = 0, bestZ = 0, bestDist = -1;
+  for (let i = 0; i < 6; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = 10 + Math.random() * (ARENA - 14);
+    const cx = Math.cos(a) * r;
+    const cz = Math.sin(a) * r;
+    const d = Math.hypot(cx - ox, cz - oz);
+    if (d > bestDist) { bestDist = d; bestX = cx; bestZ = cz; }
+  }
+  const pk = dropPickup(bestX, bestZ, 'heal', 1);
+  pk.life = 25; // live longer than normal drops so player can actually reach it
+  pk.id = `hk-${++_healthKitSeq}`;
+  pk.fromHealthKit = true;
+  pk.source = source;
+  game.healthKits.push(pk);
+  if (game.beacon) {
+    game.beacon.track(pk.id, (out) => {
+      if (pk.__gone) return null;
+      out.x = pk.x; out.z = pk.z; out.y = 0.6;
+      return out;
+    });
+  }
+  game.analytics.emit('healthkit:spawn', {
+    id: pk.id, x: +pk.x.toFixed(2), z: +pk.z.toFixed(2), source,
+  });
+}
+
+function updateHealthKits(dt) {
+  const p = game.player;
+  if (!p) return;
+
+  // Prune kits that the main pickup loop has already consumed/expired.
+  for (let i = game.healthKits.length - 1; i >= 0; i--) {
+    const pk = game.healthKits[i];
+    if (!game.pickups.includes(pk)) {
+      pk.__gone = true;
+      if (game.beacon && pk.id) game.beacon.untrack(pk.id);
+      game.healthKits.splice(i, 1);
+    }
+  }
+
+  // Regular cadence spawn.
+  game.healthKitSpawnCd -= dt;
+  if (game.healthKitSpawnCd <= 0 && game.healthKits.length < 2) {
+    spawnHealthKit('cadence');
+    game.healthKitSpawnCd = 20 + Math.random() * 8;
+  }
+
+  // Pity bump — first time HP crosses 30% in a run, spawn one immediately.
+  const hpFrac = p.hp / p.maxHp;
+  if (!game.healthKitPityArmed && hpFrac < 0.3 && game.state === 'play') {
+    game.healthKitPityArmed = true;
+    game.analytics.emit('pity:trigger', { hp: Math.max(0, p.hp | 0), hpFrac: +hpFrac.toFixed(2) });
+    if (game.healthKits.length === 0) spawnHealthKit('pity');
+  }
+  // Re-arm pity once player recovers above 60%.
+  if (game.healthKitPityArmed && hpFrac > 0.6) game.healthKitPityArmed = false;
+
+  if (game.beacon) game.beacon.update();
 }
 
 // ─── main loop ────────────────────────────────────────────────────────────────
@@ -857,6 +1029,14 @@ function updateGame(dt, now) {
   // — bean rain
   beanRainTick(game, dt, dropBeanPickup);
 
+  // — healthkit breadcrumb loop (idea: healthkit_breadcrumb_beacon)
+  updateHealthKits(dt);
+
+  // — warmup phase (level 0 first ~10s) runs in parallel with the wave clock
+  if (game.spawnScheduler && !game.boss && game.state === 'play' && !game.picker.isOpen()) {
+    game.spawnScheduler.tick(dt, { spawn: spawnWarmupDummy });
+  }
+
   // — wave logic (pre-boss) — pause while picker modal is open
   if (!game.boss && game.state === 'play' && !game.picker.isOpen()) {
     game.waveTimer -= dt;
@@ -969,6 +1149,7 @@ function nextLevel() {
   const nextIdx = game.levelIdx + 1;
   sfx.levelUp();
   game.analytics.emit('levelUp', { level: nextIdx });
+  if (game.spawnScheduler) game.spawnScheduler.endWarmup('level_advance');
   if (nextIdx >= LEVELS.length) {
     winGame();
     return;
@@ -1011,6 +1192,12 @@ function grabPickup(pk) {
   } else if (pk.kind === 'heal') {
     game.player.hp = Math.min(game.player.maxHp, game.player.hp + 25);
     game.floaters.spawn(new THREE.Vector3(pk.x, 1.5, pk.z), '+25 HP', '#FF5F5F', false);
+    if (pk.fromHealthKit) {
+      game.analytics.emit('healthkit:pickup', {
+        id: pk.id, source: pk.source,
+        hp: Math.max(0, game.player.hp | 0),
+      });
+    }
   } else {
     game.powerups.apply(pk.kind);
     game.floaters.spawn(new THREE.Vector3(pk.x, 1.5, pk.z), pk.kind.toUpperCase(), '#5FD9FF', true);
@@ -1052,6 +1239,7 @@ function endGame(reason) {
   if (game.state !== 'play') return;
   game.state = 'gameover';
   sfx.stopMusic();
+  if (game.spawnScheduler) game.spawnScheduler.endWarmup('death');
   sfx.death();
   hud.goScore.textContent = game.score;
   hud.goLevel.textContent = game.levelIdx + 1;
@@ -1086,6 +1274,11 @@ function startGame() {
   sfx.init();
   resetScene();
   resetGems();
+  // reset healthkit state per run
+  game.healthKits.length = 0;
+  game.healthKitSpawnCd = 22;
+  game.healthKitPityArmed = false;
+  if (game.beacon) game.beacon.clear();
   hud.titleOverlay.classList.add('hide');
   hud.goOverlay.classList.add('hide');
   hud.winOverlay.classList.add('hide');
@@ -1208,6 +1401,15 @@ window.__game = {
   spawnBoss,
   spawnEnemyBean, damagePlayer, dropBeanPickup,
   game,
+  get debug() {
+    return {
+      warmupOn: game.spawnScheduler ? game.spawnScheduler.isWarmup() : false,
+      warmupInfo: game.spawnScheduler ? game.spawnScheduler.debug : null,
+      healthKits: game.healthKits || [],
+      enemyOutfits: game.enemies.map((e) => e.outfitTier ?? 0),
+    };
+  },
+  get healthKits() { return game.healthKits || []; },
 };
 
 // ─── GameAPI — portable start/read surface for playtest bots ──────────────────
