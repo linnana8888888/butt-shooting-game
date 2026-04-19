@@ -4,8 +4,13 @@
 //   • enemies drop XP gems that pull via magnet
 //   • every few levels, play pauses for a 3-card upgrade pick
 //   • before each real level, a modifier roulette picks the run flavor
+//
+// Cycle-2 additions (eng-2):
+//   proto-05: XP smoothing — first XP_SMOOTH_KILLS kills grant 2× XP value.
+//   early_upgrade_guarantee_diversity: onNaturalLevelUp callback so
+//     upgrade_offers.mjs can cancel its pity timer when a real level-up fires.
 
-// ─── 1. STATS ─────────────────────────────────────────────────────────────────
+// ─── 1. STATS ─────────────────────────────────────────────────────────────────────────────────
 
 export function createStats() {
   // Multipliers default to 1 so baseline is unchanged when no upgrades taken.
@@ -27,84 +32,110 @@ export function createStats() {
   };
 }
 
-// ─── 2. XP TRACKER ────────────────────────────────────────────────────────────
+// ─── 2. XP TRACKER ─────────────────────────────────────────────────────────────────────────────
 
-export function createXp({ onLevelUp, firstThreshold = 5, growth = 1.4 } = {}) {
+// proto-05: number of kills that receive 2× XP multiplier.
+export const XP_SMOOTH_KILLS = 5;
+
+// createXp options:
+//   onLevelUp(level)       — called when xp crosses a threshold
+//   onNaturalLevelUp(level)— called on the SAME event; used by upgrade_offers.mjs
+//                            to cancel pity timer. Separate callback so callers
+//                            can wire it independently without touching onLevelUp.
+//   firstThreshold         — XP needed for level 2 (default 5)
+//   growth                 — threshold multiplier per level (default 1.4)
+export function createXp({ onLevelUp, onNaturalLevelUp, firstThreshold = 5, growth = 1.4 } = {}) {
   let xp = 0;
   let level = 1;
   let next = firstThreshold;
+  // proto-05: track how many kills have received the 2× smoothing bonus.
+  // This counter is incremented externally via grantSmoothed().
+  let smoothKillsUsed = 0;
 
   function grant(n) {
     xp += n;
-    if (xp >= next) {
+    while (xp >= next) {
       xp -= next;
       level += 1;
       next = Math.ceil(firstThreshold * Math.pow(growth, level - 1));
+      onNaturalLevelUp?.(level);
       onLevelUp?.(level);
     }
   }
 
+  // proto-05: grant XP for a gem, applying 2× multiplier for the first
+  // XP_SMOOTH_KILLS kills. Call this instead of grant() for gem pickups.
+  function grantSmoothed(n) {
+    const mult = smoothKillsUsed < XP_SMOOTH_KILLS ? 2 : 1;
+    grant(n * mult);
+  }
+
+  // Called by killEnemy to tick the smoothing counter.
+  function recordKill() {
+    if (smoothKillsUsed < XP_SMOOTH_KILLS) smoothKillsUsed += 1;
+  }
+
   function snapshot() {
-    return { xp, level, next, frac: next > 0 ? xp / next : 0 };
+    return { xp, level, next, frac: next > 0 ? xp / next : 0, smoothKillsUsed };
   }
 
   function reset() {
-    xp = 0; level = 1; next = firstThreshold;
+    xp = 0; level = 1; next = firstThreshold; smoothKillsUsed = 0;
   }
 
-  return { grant, snapshot, reset };
+  return { grant, grantSmoothed, recordKill, snapshot, reset };
 }
 
-// ─── 3. UPGRADE POOL ──────────────────────────────────────────────────────────
+// ─── 3. UPGRADE POOL ─────────────────────────────────────────────────────────────────────────────
 
 export const UPGRADES = [
   { id: 'dmg',   name: 'Bigger Beans',   desc: '+25% damage',
-    icon: '💥', max: 8,
+    icon: '\uD83D\uDCA5', max: 8,
     apply: (s) => { s.dmgMult *= 1.25; } },
   { id: 'spd',   name: 'Fast Legs',      desc: '+12% move speed',
-    icon: '💨', max: 6,
+    icon: '\uD83D\uDCA8', max: 6,
     apply: (s) => { s.speedMult *= 1.12; } },
   { id: 'fan',   name: 'Extra Spread',   desc: '+1 bean per shot',
-    icon: '🔱', max: 3,
+    icon: '\u30B3', max: 3,
     apply: (s) => { s.extraShots += 1; } },
   { id: 'mag',   name: 'Magnet Up',      desc: '+1m gem pull range',
-    icon: '🧲', max: 5,
+    icon: '\uD83E\uDDF2', max: 5,
     apply: (s) => { s.magnetRange += 1; } },
   { id: 'rld',   name: 'Quick Reload',   desc: '-20% reload time',
-    icon: '⚡', max: 5,
+    icon: '\u26A1', max: 5,
     apply: (s) => { s.reloadMult *= 0.8; } },
   { id: 'hp',    name: 'Thicker Butt',   desc: '+25 max HP (and heal)',
-    icon: '❤️', max: 5,
+    icon: '\u2764\uFE0F', max: 5,
     apply: (s) => { s.maxHpBonus += 25; } },
   { id: 'stomp', name: 'Extra Stomp',    desc: '+1 stomp stock',
-    icon: '🥾', max: 3,
+    icon: '\uD83E\uDD7E', max: 3,
     apply: (s) => { s.stompMax += 1; s.stompStock += 1; } },
 ];
 
-// ─── 4. MODIFIER POOL ─────────────────────────────────────────────────────────
+// ─── 4. MODIFIER POOL ─────────────────────────────────────────────────────────────────────────────
 
 export const MODIFIERS = [
   { id: 'lowgrav',  name: 'Low Gravity',   desc: 'Everyone floats. Feel the hang time.',
-    icon: '🌙',
+    icon: '\uD83C\uDF19',
     apply: (s) => { s.lowGrav = true; } },
-  { id: 'sniper',   name: 'Sniper Only',   desc: '3× damage. Half fire rate.',
-    icon: '🎯',
+  { id: 'sniper',   name: 'Sniper Only',   desc: '3\u00d7 damage. Half fire rate.',
+    icon: '\uD83C\uDFAF',
     apply: (s) => { s.dmgMult *= 3; s.cadenceMult *= 2.2; } },
   { id: 'giant',    name: 'Giant Beans',   desc: 'Huge beans. +50% damage.',
-    icon: '🫘',
+    icon: '\uD83FAB', // 🫘
     apply: (s) => { s.beanScale *= 2.2; s.dmgMult *= 1.5; } },
   { id: 'fast',     name: 'Overclocked',   desc: '+40% fire rate.',
-    icon: '⚡',
+    icon: '\u26A1',
     apply: (s) => { s.cadenceMult *= 0.6; } },
   { id: 'rich',     name: 'Beanrush',      desc: '+75% drop rate.',
-    icon: '💰',
+    icon: '\uD83D\uDCB0',
     apply: (s) => { s.dropMult *= 1.75; } },
   { id: 'tough',    name: 'Hard Mode',     desc: 'Enemies +50% HP. +30% score.',
-    icon: '💀',
+    icon: '\uD83D\uDC80',
     apply: (s) => { s.enemyHpMult *= 1.5; s.scoreMult *= 1.3; } },
 ];
 
-// ─── 5. PICK-3 HELPERS ────────────────────────────────────────────────────────
+// ─── 5. PICK-3 HELPERS ─────────────────────────────────────────────────────────────────────────────
 
 export function pickThreeUpgrades(stats) {
   const avail = UPGRADES.filter(u => {
@@ -139,7 +170,7 @@ export function applyUpgrade(stats, upgrade, player) {
   }
 }
 
-// ─── 6. MODAL UI ──────────────────────────────────────────────────────────────
+// ─── 6. MODAL UI ──────────────────────────────────────────────────────────────────────────────────
 // We build the modal DOM once and reuse for both upgrade and modifier picks.
 // Presentation follows the existing cream/ink card style from index.html.
 
@@ -208,7 +239,7 @@ export function createPicker(rootEl) {
   return { show, hide, isOpen };
 }
 
-// ─── 7. XP GEM ENTITY ─────────────────────────────────────────────────────────
+// ─── 7. XP GEM ENTITY ──────────────────────────────────────────────────────────────────────────────────
 // Gems are small glowing crystals that pull toward the player within magnet
 // range and grant xp when collected. Drop value scales with enemy score.
 
