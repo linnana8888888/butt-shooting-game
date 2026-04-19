@@ -19,10 +19,30 @@
 // - `error` (non-schema): top-level field added only on crash paths, outcome
 //   forced to "quit" — explicit deviation from the schema so failures surface.
 
-import { chromium } from '/Users/dknanlin/.claude/skills/email-digest/node_modules/playwright/index.mjs';
-import { mkdirSync, writeFileSync, readdirSync } from 'fs';
+// Playwright is located via $PLAYTEST_PLAYWRIGHT_MODULE (set by iterate_runner)
+// with a fallback list of known-good paths so the bot also runs standalone.
+import { mkdirSync, writeFileSync, readdirSync, existsSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { join } from 'path';
+
+async function loadChromium() {
+  const candidates = [
+    process.env.PLAYTEST_PLAYWRIGHT_MODULE,
+    '/Users/dknanlin/.claude/skills/digest/node_modules/playwright/index.mjs',
+    '/Users/dknanlin/.claude/skills/email-digest/node_modules/playwright/index.mjs',
+    'playwright',
+  ].filter(Boolean);
+  let lastErr;
+  for (const spec of candidates) {
+    try {
+      if (spec.startsWith('/') && !existsSync(spec)) continue;
+      const mod = await import(spec);
+      if (mod.chromium) return mod.chromium;
+    } catch (e) { lastErr = e; }
+  }
+  throw new Error(`Could not locate Playwright. Tried: ${candidates.join(', ')}. Last error: ${lastErr?.message || 'none'}`);
+}
+const chromium = await loadChromium();
 
 // ─── CLI parse ────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -38,7 +58,10 @@ function parseArgs(argv) {
 
 const { runs, seconds, tag } = parseArgs(process.argv);
 const URL = process.env.BSG_URL || 'http://localhost:8765/index.html';
-const REPO = '/Users/dknanlin/scratch/butt-shooting-game';
+// Write telemetry into the repo being tested. The iterate_runner sets cwd to
+// the artifact repo path before spawning us, so "./telemetry" always lands in
+// the correct per-artifact dir that load_telemetry_dir later reads.
+const REPO = process.env.PLAYTEST_REPO || process.cwd();
 const TEL_DIR = join(REPO, 'telemetry');
 mkdirSync(TEL_DIR, { recursive: true });
 
@@ -48,7 +71,11 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // ─── shared chrome launch (mirrors playtest_v4.mjs) ───────────────────────────
-const CHROME_PATH = '/Users/dknanlin/Library/Caches/ms-playwright/chromium-1217/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+// CHROME_PATH is optional. If unset, Playwright uses its own bundled browser —
+// which is the right default so we don't break whenever Playwright updates its
+// pinned chromium version. Override via $PLAYTEST_CHROME_PATH only if you need
+// a system Chrome (e.g., when running outside this repo's test harness).
+const CHROME_PATH = process.env.PLAYTEST_CHROME_PATH || null;
 const CHROME_ARGS = [
   '--use-gl=angle',
   '--use-angle=swiftshader',
@@ -120,16 +147,14 @@ async function runOnce(browser, runIdx) {
 
   try {
     await page.goto(URL);
-    await page.waitForTimeout(1200);
-
-    // Start the game
-    await page.click('#startBtn');
-    // Wait for state === 'play'
+    // Wait for GameAPI to exist (module load), then start through the contract.
+    await page.waitForFunction(() => !!window.GameAPI?.start, { timeout: 10_000 });
+    await page.evaluate(() => window.GameAPI.start({ seed: 0 }));
     await page.waitForFunction(
-      () => window.__game?.game?.state === 'play',
+      () => window.GameAPI.getState() === 'play',
       { timeout: 10_000 }
     );
-    hiScoreAtStart = await page.evaluate(() => window.__game.game.hiScore | 0);
+    hiScoreAtStart = await page.evaluate(() => window.GameAPI.getSnapshot().hiScore | 0);
 
     const deadlineMs = Date.now() + seconds * 1000;
     botStartMs = Date.now();
@@ -147,25 +172,16 @@ async function runOnce(browser, runIdx) {
 
     // Main tick loop — 100ms cadence
     while (Date.now() < deadlineMs) {
-      // Check game end conditions
-      const st = await page.evaluate(() => ({
-        state: window.__game?.game?.state,
-        pickerOpen: (() => {
-          const o = document.getElementById('pickerOverlay');
-          return !!(o && !o.classList.contains('hide'));
-        })(),
-      }));
-      if (st.state === 'gameover' || st.state === 'win') break;
+      // GameAPI.getState() returns 'title'|'play'|'picker'|'win'|'gameover'.
+      const state = await page.evaluate(() => window.GameAPI.getState());
+      if (state === 'gameover' || state === 'win') break;
 
-      // Level-up picker handling: wait 300ms "reading", then click a random card
-      if (st.pickerOpen) {
+      // Picker handling: wait 300ms "reading", then pick a random card.
+      if (state === 'picker') {
         await sleep(300);
         await page.evaluate(() => {
-          const cards = document.querySelectorAll('#pickerCards button');
-          if (cards.length) {
-            const idx = Math.floor(Math.random() * cards.length);
-            cards[idx].click();
-          }
+          const n = document.querySelectorAll('#pickerCards button').length || 1;
+          window.GameAPI.pickCard(Math.floor(Math.random() * n));
         });
         actionTimes.push(Date.now());
         await sleep(120);
@@ -227,23 +243,10 @@ async function runOnce(browser, runIdx) {
     if (shooting) await page.mouse.up().catch(() => {});
     playEndMs = Date.now();
 
-    // ── Snapshot game state ──────────────────────────────────────────────────
+    // ── Snapshot game state via GameAPI ──────────────────────────────────────
     const snap = await page.evaluate(() => {
-      const g = window.__game?.game;
-      if (!g) return null;
-      const a = g.analytics;
-      return {
-        state: g.state,
-        score: g.score | 0,
-        hiScore: g.hiScore | 0,
-        levelIdx: g.levelIdx | 0,
-        xp: g.xp?.snapshot?.() || null,
-        stats: {
-          counts: g.stats?.counts || {},
-        },
-        counters: { ...a.counters },
-        events: a.events.slice(-400),
-      };
+      if (!window.GameAPI?.getSnapshot) return null;
+      return window.GameAPI.getSnapshot();
     });
 
     const finalState = snap?.state;
@@ -258,22 +261,12 @@ async function runOnce(browser, runIdx) {
     playEndMs = Date.now();
   }
 
-  // Grab a final snapshot even on error (best-effort)
+  // Grab a final snapshot even on error (best-effort, via GameAPI)
   let snap = null;
   try {
-    snap = await page.evaluate(() => {
-      const g = window.__game?.game;
-      if (!g) return null;
-      const a = g.analytics;
-      return {
-        score: g.score | 0,
-        hiScore: g.hiScore | 0,
-        levelIdx: g.levelIdx | 0,
-        xp: g.xp?.snapshot?.() || null,
-        counters: { ...a.counters },
-        events: a.events.slice(-400),
-      };
-    });
+    snap = await page.evaluate(() =>
+      window.GameAPI?.getSnapshot ? window.GameAPI.getSnapshot() : null
+    );
   } catch {}
 
   // ── Fill telemetry ─────────────────────────────────────────────────────────
@@ -283,7 +276,7 @@ async function runOnce(browser, runIdx) {
 
   if (snap) {
     telemetry.score = snap.score;
-    telemetry.levels_reached = snap.levelIdx;
+    telemetry.levels_reached = snap.level?.idx ?? 0;
     telemetry.hi_score_beaten = snap.score > hiScoreAtStart;
     telemetry.shots_fired = snap.counters.shots | 0;
     telemetry.shots_hit   = snap.counters.hits  | 0;
@@ -378,7 +371,7 @@ async function runOnce(browser, runIdx) {
 // ─── main ─────────────────────────────────────────────────────────────────────
 const browser = await chromium.launch({
   headless: true,
-  executablePath: CHROME_PATH,
+  ...(CHROME_PATH ? { executablePath: CHROME_PATH } : {}),
   args: CHROME_ARGS,
 });
 

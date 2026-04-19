@@ -1210,6 +1210,56 @@ window.__game = {
   game,
 };
 
+// ─── GameAPI — portable start/read surface for playtest bots ──────────────────
+// Contract: code-play/docs/iteration_contract.md §1a
+// The bot drives games through this object ONLY. Never reach into __game.* from
+// new bots — __game is for dev inspection, GameAPI is the public surface.
+window.GameAPI = {
+  version: 1,
+  async start(_opts = {}) {
+    if (game.state !== 'play') startGame();
+    const deadline = performance.now() + 10_000;
+    while (game.state !== 'play' && performance.now() < deadline) {
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    if (game.state !== 'play') {
+      throw new Error(`GameAPI.start: state stayed '${game.state}' for 10s`);
+    }
+  },
+  getState() {
+    const overlay = document.getElementById('pickerOverlay');
+    const pickerOpen = !!(overlay && !overlay.classList.contains('hide'));
+    return pickerOpen ? 'picker' : game.state;
+  },
+  getSnapshot() {
+    const a = game.analytics;
+    return {
+      schemaVersion: 1,
+      state: game.state,
+      pickerOpen: this.getState() === 'picker',
+      score: game.score | 0,
+      hiScore: game.hiScore | 0,
+      level: { idx: game.levelIdx | 0, name: LEVELS[game.levelIdx]?.name ?? '' },
+      xp: game.xp?.snapshot?.() ?? { level: 1, gained: 0 },
+      counters: { ...(a?.counters ?? {}) },
+      events: (a?.events ?? []).slice(-400),
+      mag: game.player?.mag ?? null,
+      combo: game.combo?.snapshot?.() ?? null,
+    };
+  },
+  pickCard(idx) {
+    // Bot calls this on level-up / modifier picker instead of DOM-clicking cards.
+    const cards = document.querySelectorAll('#pickerCards button');
+    if (!cards.length) return false;
+    const i = Math.max(0, Math.min(cards.length - 1, idx | 0));
+    cards[i].click();
+    return true;
+  },
+  stop() {
+    // Nothing to tear down beyond closing the page; included for contract parity.
+  },
+};
+
 // ─── init UI ──────────────────────────────────────────────────────────────────
 hud.titleHi.textContent = game.hiScore;
 hud.muteBtn.textContent = sfx.isMuted() ? '🔇' : '🔊';
