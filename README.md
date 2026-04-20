@@ -2,8 +2,6 @@
 
 Arcade-style 3D shooter built with Three.js. Three themed levels, a boss fight, survivor.io-style upgrade loop, combo system, mobile touch controls, and analytics — all in vanilla ES modules, no bundler.
 
-https://github.com/linnana8888888/butt-shooting-game/raw/main/butt_shot.mp4
-
 ![Desktop gameplay](qa/v6_desktop_gameplay.png)
 
 ## Play
