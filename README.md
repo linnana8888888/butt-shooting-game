@@ -2,6 +2,8 @@
 
 Arcade-style 3D shooter built with Three.js. Three themed levels, a boss fight, survivor.io-style upgrade loop, combo system, mobile touch controls, and analytics — all in vanilla ES modules, no bundler.
 
+Made and iterated by [code-play studio](https://github.com/linnana8888888/code-play) — a multi-agent game development pipeline.
+
 ![Porcelain Lab — magnet upgrade](qa/v6_rec_02.png)
 ![Sewer Depths — late game](qa/v6_rec_05.png)
 
