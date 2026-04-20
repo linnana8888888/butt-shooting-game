@@ -329,8 +329,12 @@ function isMuted() { return _muted; }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 function init() {
-  if (AC) return; // already initialised
+  if (AC) {
+    if (AC.state === 'suspended') AC.resume();
+    return;
+  }
   AC = new (window.AudioContext || window.webkitAudioContext)();
+  if (AC.state === 'suspended') AC.resume();
   masterGain = AC.createGain();
   masterGain.gain.value = 0.25;
   masterGain.connect(AC.destination);
