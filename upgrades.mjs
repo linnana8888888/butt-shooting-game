@@ -184,7 +184,7 @@ export function createPicker(rootEl) {
       <h1 id="pickerTitle" style="margin-bottom:14px"></h1>
       <div id="pickerCards"
            style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap"></div>
-      <p class="hint" id="pickerHint">Click a card to choose.</p>
+      <p class="hint" id="pickerHint"></p>
     </div>
   `;
   rootEl.appendChild(overlay);
@@ -192,30 +192,34 @@ export function createPicker(rootEl) {
   const titleEl = overlay.querySelector('#pickerTitle');
   const cardsEl = overlay.querySelector('#pickerCards');
 
+  const hintEl = overlay.querySelector('#pickerHint');
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
   function show(title, choices, onPick, { color = '#FF5FA2' } = {}) {
     titleEl.textContent = title;
     titleEl.style.color = color;
+    hintEl.textContent = isTouch ? 'Tap a card to choose.' : 'Click a card to choose.';
     cardsEl.innerHTML = '';
     for (const choice of choices) {
       const btn = document.createElement('button');
       btn.style.cssText = [
-        'flex:1 1 180px',
-        'min-width:180px',
-        'max-width:220px',
+        'flex:1 1 min(180px, 28vw)',
+        'min-width:min(180px, 28vw)',
+        'max-width:min(220px, 40vw)',
         'background:#FFF4D6',
         'border:4px solid #2A1A0E',
         'border-radius:16px',
         'box-shadow:0 4px 0 #2A1A0E',
-        'padding:18px 14px',
+        'padding:clamp(10px, 2.5vw, 18px) clamp(8px, 2vw, 14px)',
         'cursor:pointer',
         'font-family:inherit',
         'text-align:center',
         'transition:transform 0.1s',
       ].join(';');
       btn.innerHTML = `
-        <div style="font-size:40px;line-height:1">${choice.icon}</div>
-        <div style="font-family:'Fredoka One',Fredoka,sans-serif;font-size:18px;color:#2A1A0E;margin-top:10px">${choice.name}</div>
-        <div style="font-size:13px;opacity:0.8;margin-top:6px;line-height:1.35">${choice.desc}</div>
+        <div style="font-size:clamp(24px, 7vw, 40px);line-height:1">${choice.icon}</div>
+        <div style="font-family:'Fredoka One',Fredoka,sans-serif;font-size:clamp(14px, 3.5vw, 18px);color:#2A1A0E;margin-top:8px">${choice.name}</div>
+        <div style="font-size:clamp(11px, 2.5vw, 13px);opacity:0.8;margin-top:4px;line-height:1.35">${choice.desc}</div>
       `;
       btn.onmouseenter = () => { btn.style.transform = 'translateY(-3px)'; };
       btn.onmouseleave = () => { btn.style.transform = ''; };

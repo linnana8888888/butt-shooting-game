@@ -496,7 +496,7 @@ if (isTouchDevice) {
     const cl = Math.min(d, radius);
     const ux = d ? dx / d : 0;
     const uy = d ? dy / d : 0;
-    stick.style.transform = `translate(${ux * cl}px, ${uy * cl}px)`;
+    stick.style.transform = `translate(calc(-50% + ${ux * cl}px), calc(-50% + ${uy * cl}px))`;
     const mag = cl / radius;
     touch.vx = ux * mag;
     touch.vz = uy * mag;
@@ -507,7 +507,7 @@ if (isTouchDevice) {
     activeId = null;
     touch.active = false;
     touch.vx = 0; touch.vz = 0;
-    stick.style.transform = 'translate(0,0)';
+    stick.style.transform = 'translate(-50%,-50%)';
   };
   wrap.addEventListener('pointerdown',   begin, { passive: false });
   wrap.addEventListener('pointermove',   drag,  { passive: false });
@@ -1420,7 +1420,7 @@ function startGame() {
   // Level 0 starts immediately so player can see the world and move.
   // Modifier picker only runs between levels (1, 2).
   enterLevel(0);
-  showBanner('GET READY — MOVE WITH WASD');
+  showBanner(isTouchDevice ? 'GET READY' : 'GET READY — MOVE WITH WASD');
   game.analytics.emit('start', { hi: game.hiScore });
 }
 
@@ -1437,7 +1437,7 @@ function startLevelWithModifier(idx, title = 'Pick a Modifier') {
       );
     }
     enterLevel(idx);
-    showBanner('GET READY — MOVE WITH WASD');
+    showBanner(isTouchDevice ? 'GET READY' : 'GET READY — MOVE WITH WASD');
     // return focus to the canvas/doc so WASD works
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   }, { color: '#5FD9FF' });
