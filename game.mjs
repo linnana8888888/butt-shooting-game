@@ -459,6 +459,102 @@ hud.muteBtn.addEventListener('click', () => {
   sfx.setMuted(!sfx.isMuted());
   hud.muteBtn.textContent = sfx.isMuted() ? '🔇' : '🔊';
 });
+
+// ─── v5 mobile / touch input ──────────────────────────────────────────────────
+const touch = { active: false, vx: 0, vz: 0 };
+const isTouchDevice =
+  (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches) ||
+  ('ontouchstart' in window) ||
+  (navigator.maxTouchPoints > 0);
+if (isTouchDevice) {
+  document.body.classList.add('touch-mode');
+  document.querySelectorAll('.controls-desktop').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.controls-touch').forEach(el => el.style.display = '');
+}
+
+(function initJoystick() {
+  const wrap  = document.getElementById('joystick');
+  const stick = document.getElementById('joyStick');
+  if (!wrap || !stick) return;
+  let activeId = null, cx = 0, cy = 0, radius = 55;
+  const begin = (e) => {
+    const rect = wrap.getBoundingClientRect();
+    cx = rect.left + rect.width  / 2;
+    cy = rect.top  + rect.height / 2;
+    radius = Math.max(20, rect.width / 2 - 20);
+    activeId = e.pointerId;
+    try { wrap.setPointerCapture(e.pointerId); } catch (_) {}
+    touch.active = true;
+    drag(e);
+    e.preventDefault();
+  };
+  const drag = (e) => {
+    if (activeId !== e.pointerId) return;
+    const dx = e.clientX - cx;
+    const dy = e.clientY - cy;
+    const d  = Math.hypot(dx, dy);
+    const cl = Math.min(d, radius);
+    const ux = d ? dx / d : 0;
+    const uy = d ? dy / d : 0;
+    stick.style.transform = `translate(${ux * cl}px, ${uy * cl}px)`;
+    const mag = cl / radius;
+    touch.vx = ux * mag;
+    touch.vz = uy * mag;
+    e.preventDefault();
+  };
+  const end = (e) => {
+    if (activeId !== null && activeId !== e.pointerId) return;
+    activeId = null;
+    touch.active = false;
+    touch.vx = 0; touch.vz = 0;
+    stick.style.transform = 'translate(0,0)';
+  };
+  wrap.addEventListener('pointerdown',   begin, { passive: false });
+  wrap.addEventListener('pointermove',   drag,  { passive: false });
+  wrap.addEventListener('pointerup',     end);
+  wrap.addEventListener('pointercancel', end);
+  wrap.addEventListener('pointerleave',  end);
+})();
+
+(function initShootBtn() {
+  const b = document.getElementById('mbShoot');
+  if (!b) return;
+  const down = (e) => {
+    if (game.state !== 'play') return;
+    firing = true;
+    fireNow();
+    e.preventDefault();
+  };
+  const up = (e) => { firing = false; e.preventDefault(); };
+  b.addEventListener('pointerdown',   down, { passive: false });
+  b.addEventListener('pointerup',     up);
+  b.addEventListener('pointercancel', up);
+  b.addEventListener('pointerleave',  up);
+})();
+
+document.getElementById('mbReload')?.addEventListener('pointerdown', (e) => {
+  if (game.state === 'play' && game.player) startReload(game.player, sfx);
+  else if (game.state === 'gameover' || game.state === 'win') startGame();
+  e.preventDefault();
+}, { passive: false });
+
+document.getElementById('mbStomp')?.addEventListener('pointerdown', (e) => {
+  if (game.state === 'play') tryStomp();
+  e.preventDefault();
+}, { passive: false });
+
+// Merge keyboard + joystick into a single move vector. Joystick wins when
+// active (so a stuck keydown can't override a deliberate touch input).
+function readMoveMerged() {
+  if (touch.active && (touch.vx !== 0 || touch.vz !== 0)) {
+    let ix = touch.vx, iz = touch.vz;
+    const m = Math.hypot(ix, iz);
+    if (m > 1) { ix /= m; iz /= m; }
+    return { ix, iz };
+  }
+  return readMoveInput(keys);
+}
+
 document.getElementById('devExport').addEventListener('click', () => game.analytics.exportJson());
 document.getElementById('devClear').addEventListener('click', () => game.analytics.clearStored());
 document.getElementById('devClose').addEventListener('click', () => game.analytics.showPanel(false));
@@ -587,7 +683,7 @@ function tryStomp() {
 function tryDash() {
   const p = game.player;
   if (!p || game.dashCooldown > 0) return;
-  const { ix, iz } = readMoveInput(keys);
+  const { ix, iz } = readMoveMerged();
   let dx = ix, dz = iz;
   if (dx === 0 && dz === 0) { dx = p.aimX; dz = p.aimZ; }
   p.vx += dx * 18;
@@ -834,7 +930,7 @@ function updateGame(dt, now) {
   }
 
   // — player movement
-  const { ix, iz } = readMoveInput(keys);
+  const { ix, iz } = readMoveMerged();
   const speedBoost = (game.stats?.speedMult ?? 1);
   applyMove(p, ix, iz, p.baseSpeed * speedBoost, dt);
   // arena clamp
@@ -853,6 +949,15 @@ function updateGame(dt, now) {
 
   // — camera (updates aim from mouse)
   game.cam.update(p, mouse.world);
+
+  // v5: on touch devices there is no mouse, so aim follows the joystick.
+  // If the joystick is neutral we freeze aim at whatever the player pointed
+  // at last — that way they can strafe while holding a firing direction.
+  if (isTouchDevice && touch.active && (touch.vx !== 0 || touch.vz !== 0)) {
+    const m = Math.hypot(touch.vx, touch.vz) || 1;
+    p.aimX = touch.vx / m;
+    p.aimZ = touch.vz / m;
+  }
 
   // rotate butt to face AIM, not movement — so beans visibly shoot forward
   p.rot = Math.atan2(-p.aimX, -p.aimZ);
