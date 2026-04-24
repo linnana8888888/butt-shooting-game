@@ -262,6 +262,7 @@ export const game = {
   enemies: [],
   projectiles: [],
   enemyBeans: [],
+  particles: [],
   pickups: [],
   poofs: [],
   propRoot: null,
@@ -600,17 +601,29 @@ function fireNow() {
   p.recoil.dz = -p.aimZ * 1.2;
 
   sfx.shot();
+  // v7: muzzle flash point light
+  const muzzleLight = new THREE.PointLight(0xFFFF88, 2, 4);
+  muzzleLight.position.set(p.x, 1.0, p.z);
+  scene.add(muzzleLight);
+  setTimeout(() => scene.remove(muzzleLight), 100);
 }
 
 function spawnBean(x, z, ax, az, dmg, scaleMult = 1) {
-  const bean = buildBean(C.beanGold);
+  // v7: cylinder projectile oriented toward travel direction
+  const projGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 8);
+  projGeo.rotateX(Math.PI / 2); // align with Z axis
+  const projMat = toon(C.beanGold);
+  const bean = new THREE.Mesh(projGeo, projMat);
   if (scaleMult !== 1) bean.scale.setScalar(scaleMult);
+  // rotate to face direction of travel
+  bean.rotation.y = Math.atan2(ax, az);
   bean.position.set(x, 0.8, z);
   scene.add(bean);
   game.projectiles.push({
     obj: bean, x, z, y: 0.8,
     vx: ax * 30, vz: az * 30,
     life: 1.0, damage: dmg,
+    ax, az,
   });
 }
 
@@ -711,6 +724,28 @@ function spawnPoof(x, z, color, count = 8) {
       vy: 1 + Math.random() * 1.5,
       vz: Math.sin(a) * (1 + Math.random() * 1.5),
       life: 0.5 + Math.random() * 0.2,
+    });
+  }
+}
+
+// v7: hit burst — 8 particles in random directions
+function spawnHitBurst(x, y, z) {
+  for (let i = 0; i < 8; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const elev = (Math.random() - 0.5) * Math.PI;
+    const pGeo = new THREE.SphereGeometry(0.07, 4, 3);
+    const pMat = new THREE.MeshBasicMaterial({ color: 0xFF5FA2, transparent: true, opacity: 0.9 });
+    const pMesh = new THREE.Mesh(pGeo, pMat);
+    pMesh.position.set(x, y, z);
+    scene.add(pMesh);
+    const speed = 3;
+    game.particles.push({
+      obj: pMesh,
+      life: 0.25,
+      maxLife: 0.25,
+      vx: Math.cos(a) * Math.cos(elev) * speed,
+      vy: Math.sin(elev) * speed,
+      vz: Math.sin(a) * Math.cos(elev) * speed,
     });
   }
 }
@@ -994,6 +1029,23 @@ function updateGame(dt, now) {
     b.obj.position.set(b.x, b.y, b.z);
     b.obj.rotation.y += dt * 8;
 
+    // v7: spawn 2 trail particles per projectile per frame
+    for (let t = 0; t < 2; t++) {
+      const pGeo = new THREE.SphereGeometry(0.05, 4, 3);
+      const pMat = new THREE.MeshBasicMaterial({ color: 0xFFD24D, transparent: true, opacity: 0.7 });
+      const pMesh = new THREE.Mesh(pGeo, pMat);
+      pMesh.position.set(b.x, b.y, b.z);
+      scene.add(pMesh);
+      game.particles.push({
+        obj: pMesh,
+        life: 0.3,
+        maxLife: 0.3,
+        vx: (Math.random() - 0.5) * 1.5,
+        vy: (Math.random() - 0.5) * 1.5,
+        vz: (Math.random() - 0.5) * 1.5,
+      });
+    }
+
     // collide with enemies
     let hit = false;
     for (let j = game.enemies.length - 1; j >= 0; j--) {
@@ -1004,6 +1056,8 @@ function updateGame(dt, now) {
         e.hp -= b.damage;
         game.analytics.emit('hit', {});
         spawnPoof(ex, ez, C.impact, 3);
+        // v7: hit burst — 8 particles
+        spawnHitBurst(b.x, b.y, b.z);
         hit = true;
         if (e.hp <= 0) killEnemy(j);
         break;
@@ -1017,6 +1071,8 @@ function updateGame(dt, now) {
         game.boss.ref.hp -= b.damage;
         game.analytics.emit('bossHit');
         spawnPoof(bo.x, bo.z, C.impact, 4);
+        // v7: hit burst on boss
+        spawnHitBurst(b.x, b.y, b.z);
         hit = true;
         if (game.boss.ref.hp <= 0) killBoss();
         updateBossHud();
@@ -1121,6 +1177,24 @@ function updateGame(dt, now) {
       d.obj.geometry.dispose();
       d.obj.material.dispose();
       game.poofs.splice(i, 1);
+    }
+  }
+
+  // — v7 particles (trail + hit burst)
+  for (let i = game.particles.length - 1; i >= 0; i--) {
+    const pt = game.particles[i];
+    pt.life -= dt;
+    pt.obj.position.x += pt.vx * dt;
+    pt.obj.position.y += pt.vy * dt;
+    pt.obj.position.z += pt.vz * dt;
+    const frac = pt.life / pt.maxLife;
+    pt.obj.scale.setScalar(Math.max(0.01, frac));
+    pt.obj.material.opacity = Math.max(0, frac * 0.9);
+    if (pt.life <= 0) {
+      scene.remove(pt.obj);
+      pt.obj.geometry.dispose();
+      pt.obj.material.dispose();
+      game.particles.splice(i, 1);
     }
   }
 
@@ -1404,6 +1478,7 @@ function resetScene() {
   for (const b of game.enemyBeans) scene.remove(b.obj);
   for (const p of game.pickups) scene.remove(p.obj);
   for (const d of game.poofs) scene.remove(d.obj);
+  for (const pt of game.particles) scene.remove(pt.obj);
   for (const g of game.gems) scene.remove(g.obj);
   if (game.boss) scene.remove(game.boss.obj);
   game.enemies.length = 0;
@@ -1411,6 +1486,7 @@ function resetScene() {
   game.enemyBeans.length = 0;
   game.pickups.length = 0;
   game.poofs.length = 0;
+  game.particles.length = 0;
   game.gems.length = 0;
   game.boss = null;
 }
