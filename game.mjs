@@ -23,6 +23,7 @@ import {
 import { createSpawnScheduler } from './spawn_scheduler.mjs';
 import { createBeaconRenderer } from './beacon_renderer.mjs';
 import { createAchievements } from './achievements.mjs';
+import { createScenery } from './scenery.mjs';
 
 // ─── shared palette + constants ───────────────────────────────────────────────
 const C = {
@@ -455,6 +456,7 @@ game.combo     = createCombo({ windowSec: 2.0 });
 game.analytics = createAnalytics(hud.devpanel, hud.devstats, hud.devevents);
 game.hiScore   = game.analytics.loadHiScore();
 game.achievements = createAchievements();
+game.scenery = createScenery(scene);
 // v8: continue system state
 game.continueUsed = false;
 game.continueTimer = null;
@@ -896,6 +898,8 @@ function enterLevel(idx) {
   sfx.waveStart();
   game.analytics.emit('levelStart', { level: idx, name: cfg.name });
   if (game.spawnScheduler) game.spawnScheduler.startWarmup(idx);
+  // v8: load Kenney background scenery for this level
+  if (game.scenery) game.scenery.loadLevel(idx);
 }
 
 function showBanner(text) {
@@ -1866,6 +1870,8 @@ function startGame() {
   if (hud.continueOverlay) hud.continueOverlay.classList.add('hide');
   hud.bossbar.classList.remove('show');
   game.picker.hide();
+  // v8: clear scenery props
+  if (game.scenery) game.scenery.clear();
   // v8: reset per-run state
   game.continueUsed = false;
   if (game.continueTimer) { clearInterval(game.continueTimer); game.continueTimer = null; }
