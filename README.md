@@ -1,4 +1,4 @@
-# Butt Shooting Game v6
+# Butt Shooting Game v7
 
 Arcade-style 3D shooter built with Three.js. Three themed levels, a boss fight, survivor.io-style upgrade loop, combo system, mobile touch controls, and analytics — all in vanilla ES modules, no bundler.
 
@@ -42,11 +42,13 @@ On-screen joystick (left) for movement, FIRE button (right) to shoot, plus RELOA
 
 ## Levels
 
-1. **Desert Dunes** — 20 kills to advance. Flushers, buttlings, windies. Cacti and rocks.
-2. **Porcelain Lab** — 30 kills. Adds toilet golems. Toilets, pipes, tiles.
-3. **Sewer Depths** — 40 kills then **Clog King** boss (80 HP, 3 phases).
+1. **Desert Dunes** — 20 kills to advance. Flushers, buttlings, windies. Cacti and rocks. Sandy floor shader.
+2. **Porcelain Lab** — 30 kills. Adds toilet golems. Toilets, pipes, tiles. Grid floor shader.
+3. **Sewer Depths** — 40 kills then **Clog King** boss (80 HP, 3 phases). Specular sewer floor shader.
+4. **Toxic Swamp** — 50 kills. SwampGas (AoE death), MudCrawlers (group spawn), buttlings. Dead trees, lily pads, toxic barrels. Swamp floor shader.
+5. **Void Dimension** — 60 kills then **Mega Clog King** boss (150 HP, 4 phases). VoidShards (teleporting), ShadowClones (mirrors player), buttlings. Crystal shards, void portals. Void floor shader.
 
-Win condition: defeat the Clog King.
+Win condition: defeat the Mega Clog King.
 
 ## Mechanics
 
@@ -109,6 +111,7 @@ Additional playtest scripts: `playtest_bot.mjs`, `playtest_new_ideas.mjs`, `play
 | v4 | XP gems, level-up upgrades, stomp, modifier roulette, warmup dummies, healthkit beacon, outfit overlay |
 | v5 | Mobile HUD, on-screen joystick, touch fire/reload/stomp |
 | v6 | Responsive mobile adaptation, compact phone HUD, scaled touch controls, landscape support, iOS audio fix |
+| v7 | Gradient skydome shader, procedural floor shaders, enemy glow pulse + shadow discs, cylinder projectiles + particle trails + hit bursts, muzzle flash, screen flash/vignette/shake, Toxic Swamp level, Void Dimension level, Mega Clog King boss (150 HP, 4 phases), new enemies: swampGas, mudCrawler, voidShard, shadowClone |
 
 ## Tech
 

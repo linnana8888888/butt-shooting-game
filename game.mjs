@@ -9,6 +9,8 @@ import {
 import {
   createFloaters, createCombo, createPowerups,
   buildClogKing, clogKingAI, beanRainTick,
+  buildMegaClogKing, megaClogKingAI,
+  flashDamage, updateVignette, shakeCamera,
 } from './juice.mjs';
 import { buildButt, makePlayer, tryShoot, startReload, updateReload, readMoveInput, applyMove } from './player.mjs';
 import { createCamera } from './camera.mjs';
@@ -136,12 +138,116 @@ function buildWindy() {
   g.userData.stats = { hp: 3, speed: 1.8, radius: 0.6, score: 20, damage: 12, dropChance: 0.35, toxic: true };
   return g;
 }
+function buildSwampGas() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.SphereGeometry(0.5, 12, 8),
+    toon(0x44AA22, { emissive: 0x226600, emissiveIntensity: 0.4, transparent: true, opacity: 0.85 })
+  );
+  body.position.y = 0.6;
+  withOutline(body, 0.07);
+  g.add(body);
+  // bubbles
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2;
+    const bubble = new THREE.Mesh(
+      new THREE.SphereGeometry(0.15, 7, 5),
+      toon(0x66CC33, { transparent: true, opacity: 0.7 })
+    );
+    bubble.position.set(Math.cos(a) * 0.35, 0.7 + i * 0.1, Math.sin(a) * 0.35);
+    g.add(bubble);
+  }
+  g.add(blobShadow(0.5));
+  g.userData.stats = {
+    hp: 3, speed: 1.2, radius: 0.55,
+    score: 18, damage: 12, dropChance: 0.3,
+    onDeath: 'swampGasExplode',
+  };
+  return g;
+}
+
+function buildMudCrawler() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.3, 0.5),
+    toon(0x7A5C3A)
+  );
+  body.position.y = 0.2;
+  withOutline(body, 0.06);
+  g.add(body);
+  // eyes
+  for (const sx of [-0.12, 0.12]) {
+    const eye = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 6, 5),
+      toon(C.rival, { emissive: C.rival, emissiveIntensity: 0.8 })
+    );
+    eye.position.set(sx, 0.28, -0.24);
+    g.add(eye);
+  }
+  g.add(blobShadow(0.3));
+  g.userData.stats = {
+    hp: 1, speed: 5.0, radius: 0.35,
+    score: 8, damage: 8, dropChance: 0.1,
+    spawnGroup: 5,
+  };
+  return g;
+}
+
+function buildVoidShard() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.45, 0),
+    toon(0x9933FF, { emissive: 0x6600CC, emissiveIntensity: 0.6 })
+  );
+  body.position.y = 0.6;
+  withOutline(body, 0.07);
+  g.add(body);
+  g.add(blobShadow(0.4));
+  g.userData.stats = {
+    hp: 4, speed: 2.5, radius: 0.5,
+    score: 22, damage: 14, dropChance: 0.35,
+    teleportCd: 2.0, _teleportTimer: 0,
+  };
+  return g;
+}
+
+function buildShadowClone() {
+  const g = new THREE.Group();
+  // dark butt-shaped mesh
+  for (const sx of [-0.22, 0.22]) {
+    const cheek = new THREE.Mesh(
+      new THREE.SphereGeometry(0.35, 14, 10),
+      toon(0x333333, { emissive: 0x111111, emissiveIntensity: 0.3 })
+    );
+    cheek.position.set(sx, 0.35, 0);
+    withOutline(cheek, 0.06);
+    g.add(cheek);
+  }
+  const cleft = new THREE.Mesh(
+    new THREE.BoxGeometry(0.04, 0.5, 0.35),
+    toon(0x111111)
+  );
+  cleft.position.set(0, 0.35, 0);
+  g.add(cleft);
+  g.add(blobShadow(0.4));
+  g.userData.stats = {
+    hp: 2, speed: 3.0, radius: 0.4,
+    score: 15, damage: 12, dropChance: 0.2,
+    isShadowClone: true,
+  };
+  return g;
+}
+
 function buildEnemyByKind(kind) {
   if (kind === 'flusher')     return buildFlusher();
   if (kind === 'buttling')    return buildButtling();
   if (kind === 'windy')       return buildWindy();
-  if (kind === 'toiletGolem') return buildToiletGolem(ctx);
-  if (kind === 'sewerRat')    return buildSewerRat(ctx);
+  if (kind === 'toiletGolem')  return buildToiletGolem(ctx);
+  if (kind === 'sewerRat')     return buildSewerRat(ctx);
+  if (kind === 'swampGas')     return buildSwampGas();
+  if (kind === 'mudCrawler')   return buildMudCrawler();
+  if (kind === 'voidShard')    return buildVoidShard();
+  if (kind === 'shadowClone')  return buildShadowClone();
   return buildFlusher();
 }
 
@@ -262,6 +368,7 @@ export const game = {
   enemies: [],
   projectiles: [],
   enemyBeans: [],
+  particles: [],
   pickups: [],
   poofs: [],
   propRoot: null,
@@ -600,17 +707,29 @@ function fireNow() {
   p.recoil.dz = -p.aimZ * 1.2;
 
   sfx.shot();
+  // v7: muzzle flash point light
+  const muzzleLight = new THREE.PointLight(0xFFFF88, 2, 4);
+  muzzleLight.position.set(p.x, 1.0, p.z);
+  scene.add(muzzleLight);
+  setTimeout(() => scene.remove(muzzleLight), 100);
 }
 
 function spawnBean(x, z, ax, az, dmg, scaleMult = 1) {
-  const bean = buildBean(C.beanGold);
+  // v7: cylinder projectile oriented toward travel direction
+  const projGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 8);
+  projGeo.rotateX(Math.PI / 2); // align with Z axis
+  const projMat = toon(C.beanGold);
+  const bean = new THREE.Mesh(projGeo, projMat);
   if (scaleMult !== 1) bean.scale.setScalar(scaleMult);
+  // rotate to face direction of travel
+  bean.rotation.y = Math.atan2(ax, az);
   bean.position.set(x, 0.8, z);
   scene.add(bean);
   game.projectiles.push({
     obj: bean, x, z, y: 0.8,
     vx: ax * 30, vz: az * 30,
     life: 1.0, damage: dmg,
+    ax, az,
   });
 }
 
@@ -715,6 +834,28 @@ function spawnPoof(x, z, color, count = 8) {
   }
 }
 
+// v7: hit burst — 8 particles in random directions
+function spawnHitBurst(x, y, z) {
+  for (let i = 0; i < 8; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const elev = (Math.random() - 0.5) * Math.PI;
+    const pGeo = new THREE.SphereGeometry(0.07, 4, 3);
+    const pMat = new THREE.MeshBasicMaterial({ color: 0xFF5FA2, transparent: true, opacity: 0.9 });
+    const pMesh = new THREE.Mesh(pGeo, pMat);
+    pMesh.position.set(x, y, z);
+    scene.add(pMesh);
+    const speed = 3;
+    game.particles.push({
+      obj: pMesh,
+      life: 0.25,
+      maxLife: 0.25,
+      vx: Math.cos(a) * Math.cos(elev) * speed,
+      vy: Math.sin(elev) * speed,
+      vz: Math.sin(a) * Math.cos(elev) * speed,
+    });
+  }
+}
+
 // ─── level progression ────────────────────────────────────────────────────────
 function enterLevel(idx) {
   const cfg = LEVELS[idx];
@@ -749,10 +890,10 @@ function pickEnemyKind(cfg) {
   return cfg.enemyMix[0].kind;
 }
 
-function spawnEnemyForLevel() {
+function spawnEnemyForLevel(forceKind) {
   const cfg = LEVELS[game.levelIdx];
   if (!cfg) return;
-  const kind = pickEnemyKind(cfg);
+  const kind = forceKind || pickEnemyKind(cfg);
   const enemy = buildEnemyByKind(kind);
   // spawn at arena edge
   const a = Math.random() * Math.PI * 2;
@@ -763,6 +904,16 @@ function spawnEnemyForLevel() {
   const hp = enemy.userData.stats.hp * hpMult;
   const record = { obj: enemy, kind, hp, stats: enemy.userData.stats };
   applyOutfit(record);
+  // v7: glow phase
+  enemy.userData.glowPhase = Math.random() * Math.PI * 2;
+  // v7: shadow disc
+  const _sdGeo = new THREE.CircleGeometry(0.6, 16);
+  _sdGeo.rotateX(-Math.PI / 2);
+  const _sdMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3 });
+  const _sd = new THREE.Mesh(_sdGeo, _sdMat);
+  _sd.position.set(enemy.position.x, 0.05, enemy.position.z);
+  scene.add(_sd);
+  record.shadowDisc = _sd;
   game.enemies.push(record);
 }
 
@@ -788,20 +939,40 @@ function spawnWarmupDummy(spec) {
     tag: spec.tag || 'warmup_dummy',
   };
   applyOutfit(record);
+  // v7: glow phase
+  enemy.userData.glowPhase = Math.random() * Math.PI * 2;
+  // v7: shadow disc
+  const _wsdGeo = new THREE.CircleGeometry(0.6, 16);
+  _wsdGeo.rotateX(-Math.PI / 2);
+  const _wsdMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3 });
+  const _wsd = new THREE.Mesh(_wsdGeo, _wsdMat);
+  _wsd.position.set(enemy.position.x, 0.05, enemy.position.z);
+  scene.add(_wsd);
+  record.shadowDisc = _wsd;
   game.enemies.push(record);
   return record;
 }
 
-function spawnBoss() {
-  const boss = buildClogKing(ctx);
+function spawnBoss(bossKind) {
+  const kind = bossKind || (LEVELS[game.levelIdx]?.boss) || 'clog_king';
+  let boss;
+  let bossName;
+  if (kind === 'mega_clog_king') {
+    boss = buildMegaClogKing(ctx);
+    bossName = 'MEGA CLOG KING';
+  } else {
+    boss = buildClogKing(ctx);
+    bossName = 'CLOG KING';
+  }
   boss.position.set(0, 0, -ARENA + 5);
   scene.add(boss);
-  game.boss = { obj: boss, ref: boss.userData.boss };
+  game.boss = { obj: boss, ref: boss.userData.boss, kind };
   hud.bossbar.classList.add('show');
+  hud.bossName.textContent = bossName;
   hud.bosshp.style.width = '100%';
   sfx.waveStart();
-  showBanner('CLOG KING');
-  game.analytics.emit('bossSpawn');
+  showBanner(bossName);
+  game.analytics.emit('bossSpawn', { kind });
 }
 
 // ─── drop logic ───────────────────────────────────────────────────────────────
@@ -900,6 +1071,10 @@ function updateHealthKits(dt) {
 }
 
 // ─── main loop ────────────────────────────────────────────────────────────────
+// v7: player position history for shadowClone (1.5s buffer)
+const _playerPosHistory = [];
+const _HISTORY_DURATION = 1.5;
+
 let last = performance.now() / 1000;
 function tick() {
   const now = performance.now() / 1000;
@@ -927,6 +1102,13 @@ function updateGame(dt, now) {
   if (game.picker.isOpen()) {
     renderHud();
     return;
+  }
+
+  // — v7: record player position history for shadowClone
+  _playerPosHistory.push({ x: p.x, z: p.z, t: now });
+  // prune old entries
+  while (_playerPosHistory.length > 0 && now - _playerPosHistory[0].t > _HISTORY_DURATION + 0.1) {
+    _playerPosHistory.shift();
   }
 
   // — player movement
@@ -974,6 +1156,23 @@ function updateGame(dt, now) {
     b.obj.position.set(b.x, b.y, b.z);
     b.obj.rotation.y += dt * 8;
 
+    // v7: spawn 2 trail particles per projectile per frame
+    for (let t = 0; t < 2; t++) {
+      const pGeo = new THREE.SphereGeometry(0.05, 4, 3);
+      const pMat = new THREE.MeshBasicMaterial({ color: 0xFFD24D, transparent: true, opacity: 0.7 });
+      const pMesh = new THREE.Mesh(pGeo, pMat);
+      pMesh.position.set(b.x, b.y, b.z);
+      scene.add(pMesh);
+      game.particles.push({
+        obj: pMesh,
+        life: 0.3,
+        maxLife: 0.3,
+        vx: (Math.random() - 0.5) * 1.5,
+        vy: (Math.random() - 0.5) * 1.5,
+        vz: (Math.random() - 0.5) * 1.5,
+      });
+    }
+
     // collide with enemies
     let hit = false;
     for (let j = game.enemies.length - 1; j >= 0; j--) {
@@ -984,6 +1183,8 @@ function updateGame(dt, now) {
         e.hp -= b.damage;
         game.analytics.emit('hit', {});
         spawnPoof(ex, ez, C.impact, 3);
+        // v7: hit burst — 8 particles
+        spawnHitBurst(b.x, b.y, b.z);
         hit = true;
         if (e.hp <= 0) killEnemy(j);
         break;
@@ -997,6 +1198,8 @@ function updateGame(dt, now) {
         game.boss.ref.hp -= b.damage;
         game.analytics.emit('bossHit');
         spawnPoof(bo.x, bo.z, C.impact, 4);
+        // v7: hit burst on boss
+        spawnHitBurst(b.x, b.y, b.z);
         hit = true;
         if (game.boss.ref.hp <= 0) killBoss();
         updateBossHud();
@@ -1039,6 +1242,47 @@ function updateGame(dt, now) {
     e.obj.position.x += (dx / d) * spd * dt;
     e.obj.position.z += (dz / d) * spd * dt;
     e.obj.rotation.y = Math.atan2(dx, dz);
+    // v7: glow pulse
+    e.obj.traverse(child => {
+      if (child.isMesh && child.material && child.material.emissive) {
+        child.material.emissiveIntensity = 0.15 + 0.1 * Math.sin(now * 3 + (e.obj.userData.glowPhase || 0));
+      }
+    });
+    // v7: shadow disc follows enemy
+    if (e.shadowDisc) {
+      e.shadowDisc.position.set(e.obj.position.x, 0.05, e.obj.position.z);
+    }
+    // v7: voidShard teleport
+    if (e.kind === 'voidShard' && e.stats._teleportTimer !== undefined) {
+      e.stats._teleportTimer -= dt;
+      if (e.stats._teleportTimer <= 0) {
+        e.stats._teleportTimer = 2.0;
+        const ta = Math.random() * Math.PI * 2;
+        const tr = Math.random() * 15;
+        e.obj.position.x = p.x + Math.cos(ta) * tr;
+        e.obj.position.z = p.z + Math.sin(ta) * tr;
+        // clamp to arena
+        const td = Math.hypot(e.obj.position.x, e.obj.position.z);
+        if (td > ARENA - 2) {
+          e.obj.position.x = (e.obj.position.x / td) * (ARENA - 2);
+          e.obj.position.z = (e.obj.position.z / td) * (ARENA - 2);
+        }
+        spawnPoof(e.obj.position.x, e.obj.position.z, 0x9933FF, 5);
+      }
+    }
+    // v7: shadowClone — follow player position from 1.5s ago
+    if (e.kind === 'shadowClone' && _playerPosHistory.length > 0) {
+      const targetT = now - 1.5;
+      let hist = _playerPosHistory[0];
+      for (const h of _playerPosHistory) {
+        if (h.t <= targetT) hist = h;
+      }
+      const sdx = hist.x - e.obj.position.x;
+      const sdz = hist.z - e.obj.position.z;
+      const sd = Math.hypot(sdx, sdz) || 1;
+      e.obj.position.x += (sdx / sd) * e.stats.speed * dt;
+      e.obj.position.z += (sdz / sd) * e.stats.speed * dt;
+    }
     if (d < e.stats.radius + 0.5 && p.iFrames <= 0) {
       damagePlayer(e.stats.damage);
       // knockback
@@ -1049,11 +1293,16 @@ function updateGame(dt, now) {
 
   // — boss
   if (game.boss) {
-    clogKingAI(game.boss.obj, p, dt, {
+    const bossAI = game.boss.kind === 'mega_clog_king' ? megaClogKingAI : clogKingAI;
+    bossAI(game.boss.obj, p, dt, {
       spawnEnemyBean,
       damagePlayer,
       spawnPoof,
       sfx,
+      onPhaseChange: (phase) => shakeCamera(camera, 0.4, 500),
+      spawnEnemyForLevel: (kind) => spawnEnemyForLevel(kind),
+      scene,
+      THREE,
     });
   }
 
@@ -1091,6 +1340,24 @@ function updateGame(dt, now) {
       d.obj.geometry.dispose();
       d.obj.material.dispose();
       game.poofs.splice(i, 1);
+    }
+  }
+
+  // — v7 particles (trail + hit burst)
+  for (let i = game.particles.length - 1; i >= 0; i--) {
+    const pt = game.particles[i];
+    pt.life -= dt;
+    pt.obj.position.x += pt.vx * dt;
+    pt.obj.position.y += pt.vy * dt;
+    pt.obj.position.z += pt.vz * dt;
+    const frac = pt.life / pt.maxLife;
+    pt.obj.scale.setScalar(Math.max(0.01, frac));
+    pt.obj.material.opacity = Math.max(0, frac * 0.9);
+    if (pt.life <= 0) {
+      scene.remove(pt.obj);
+      pt.obj.geometry.dispose();
+      pt.obj.material.dispose();
+      game.particles.splice(i, 1);
     }
   }
 
@@ -1159,6 +1426,8 @@ function renderHud() {
   const p = game.player;
   if (!p) return;
   hud.hpbar.style.width = `${Math.max(0, (p.hp / p.maxHp) * 100)}%`;
+  // v7: dynamic vignette
+  updateVignette(p.hp / p.maxHp);
 
   const magRatio = p.mag.reloading ? (1 - p.mag.reloadT / p.mag.reloadTime) : (p.mag.cur / p.mag.max);
   const circumference = 2 * Math.PI * 17; // ≈106.81
@@ -1202,10 +1471,58 @@ function updateBossHud() {
 function killEnemy(idx) {
   const e = game.enemies[idx];
   const ex = e.obj.position.x, ez = e.obj.position.z;
+  // v7: remove shadow disc
+  if (e.shadowDisc) {
+    scene.remove(e.shadowDisc);
+    e.shadowDisc.geometry.dispose();
+    e.shadowDisc.material.dispose();
+    e.shadowDisc = null;
+  }
   scene.remove(e.obj);
   e.obj.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
   game.enemies.splice(idx, 1);
   spawnPoof(ex, ez, C.impact, 8);
+
+  // v7: swampGas AoE explosion on death
+  if (e.kind === 'swampGas') {
+    const AoE_R = 3, AoE_DMG = 15;
+    const pp = game.player;
+    if (pp) {
+      const ddx = pp.x - ex, ddz = pp.z - ez;
+      if (ddx * ddx + ddz * ddz < AoE_R * AoE_R) {
+        damagePlayer(AoE_DMG);
+      }
+    }
+    spawnPoof(ex, ez, 0x44AA22, 14);
+    spawnPoof(ex, ez, 0x88FF00, 8);
+  }
+
+  // v7: mudCrawler spawns in groups of 5
+  if (e.kind === 'mudCrawler' && !e._groupSpawned) {
+    const cfg = LEVELS[game.levelIdx];
+    if (cfg && game.enemies.length < game.enemyCap) {
+      const spawnCount = Math.min(4, game.enemyCap - game.enemies.length);
+      for (let _i = 0; _i < spawnCount; _i++) {
+        const ga = Math.random() * Math.PI * 2;
+        const gr = 1.5 + Math.random() * 2;
+        const crawler = buildMudCrawler();
+        crawler.position.set(ex + Math.cos(ga) * gr, 0, ez + Math.sin(ga) * gr);
+        scene.add(crawler);
+        const hpMult = game.stats?.enemyHpMult ?? 1;
+        const hp = crawler.userData.stats.hp * hpMult;
+        const rec = { obj: crawler, kind: 'mudCrawler', hp, stats: crawler.userData.stats, _groupSpawned: true };
+        crawler.userData.glowPhase = Math.random() * Math.PI * 2;
+        const _sdGeo2 = new THREE.CircleGeometry(0.6, 16);
+        _sdGeo2.rotateX(-Math.PI / 2);
+        const _sdMat2 = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3 });
+        const _sd2 = new THREE.Mesh(_sdGeo2, _sdMat2);
+        _sd2.position.set(crawler.position.x, 0.05, crawler.position.z);
+        scene.add(_sd2);
+        rec.shadowDisc = _sd2;
+        game.enemies.push(rec);
+      }
+    }
+  }
 
   // combo
   const cRes = game.combo.hit();
@@ -1241,8 +1558,8 @@ function killEnemy(idx) {
   // level progression
   const cfg = LEVELS[game.levelIdx];
   if (cfg && !game.boss && game.killsInLevel >= cfg.kills) {
-    if (cfg.boss === 'clog_king') {
-      spawnBoss();
+    if (cfg.boss) {
+      spawnBoss(cfg.boss);
     } else {
       // advance level
       nextLevel();
@@ -1273,6 +1590,8 @@ function killBoss() {
   boss.obj.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose?.(); } });
   game.boss = null;
   hud.bossbar.classList.remove('show');
+  // v7: clean up mega boss tint
+  document.getElementById('mega-boss-tint')?.remove();
   sfx.levelUp();
   game.analytics.emit('bossKill', { score: game.score });
   // confetti
@@ -1317,6 +1636,7 @@ function damagePlayer(n) {
   p.hp -= n;
   p.iFrames = 0.5;
   sfx.hurt();
+  flashDamage();
   game.floaters.spawn(new THREE.Vector3(p.x, 2, p.z), `-${n}`, '#FF4040', false);
   game.analytics.emit('hurt', { dmg: n, hp: Math.max(0, p.hp) });
   if (p.hp <= 0) {
@@ -1359,11 +1679,15 @@ function endGame(reason) {
 
 // ─── start / reset ────────────────────────────────────────────────────────────
 function resetScene() {
-  for (const e of game.enemies) scene.remove(e.obj);
+  for (const e of game.enemies) {
+    scene.remove(e.obj);
+    if (e.shadowDisc) { scene.remove(e.shadowDisc); e.shadowDisc.geometry.dispose(); e.shadowDisc.material.dispose(); }
+  }
   for (const b of game.projectiles) scene.remove(b.obj);
   for (const b of game.enemyBeans) scene.remove(b.obj);
   for (const p of game.pickups) scene.remove(p.obj);
   for (const d of game.poofs) scene.remove(d.obj);
+  for (const pt of game.particles) scene.remove(pt.obj);
   for (const g of game.gems) scene.remove(g.obj);
   if (game.boss) scene.remove(game.boss.obj);
   game.enemies.length = 0;
@@ -1371,6 +1695,7 @@ function resetScene() {
   game.enemyBeans.length = 0;
   game.pickups.length = 0;
   game.poofs.length = 0;
+  game.particles.length = 0;
   game.gems.length = 0;
   game.boss = null;
 }
