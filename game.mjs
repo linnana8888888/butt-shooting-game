@@ -363,6 +363,8 @@ function buildPickupMesh(kind) {
 export const game = {
   state: 'title',
   wave: 1,
+  waveKills: 0,          // kills in current wave
+  waveKillTarget: 10,    // kills needed to advance wave
   levelIdx: 0,
   killsInLevel: 0,
   player: null,
@@ -432,6 +434,9 @@ const hud = {
   goKills: document.getElementById('goKills'),
   goBestCombo: document.getElementById('goBestCombo'),
   goHi: document.getElementById('goHi'),
+  waveNum: document.getElementById('waveNum'),
+  leaderboardOverlay: document.getElementById('leaderboard'),
+  lbList: document.getElementById('lbList'),
   continueOverlay: document.getElementById('continueScreen'),
   continueCountdown: document.getElementById('continueCountdown'),
   continueBtn: document.getElementById('continueBtn'),
@@ -457,6 +462,57 @@ game.analytics = createAnalytics(hud.devpanel, hud.devstats, hud.devevents);
 game.hiScore   = game.analytics.loadHiScore();
 game.achievements = createAchievements();
 game.scenery = createScenery(scene);
+
+// ─── v8: Leaderboard (localStorage top-10) ───────────────────────────────────
+const LS_LB = 'bsg_leaderboard_v8';
+function lbLoad() {
+  try { return JSON.parse(localStorage.getItem(LS_LB) || '[]'); } catch { return []; }
+}
+function lbSave(entry) {
+  // entry: { score, level, wave, time, accuracy, date }
+  const arr = lbLoad();
+  arr.push(entry);
+  arr.sort((a, b) => b.score - a.score);
+  arr.splice(10); // keep top 10
+  try { localStorage.setItem(LS_LB, JSON.stringify(arr)); } catch {}
+  return arr;
+}
+function lbRender() {
+  const arr = lbLoad();
+  if (!hud.lbList) return;
+  if (arr.length === 0) {
+    hud.lbList.innerHTML = '<div style="opacity:0.6">No runs yet. Play to set a record!</div>';
+    return;
+  }
+  hud.lbList.innerHTML = arr.map((e, i) => {
+    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+    const date = e.date ? new Date(e.date).toLocaleDateString() : '';
+    return `<div style="display:flex;justify-content:space-between;gap:16px">
+      <span>${medal} <b>${e.score.toLocaleString()}</b></span>
+      <span>Lv${e.level} W${e.wave} ${e.time}s ${e.accuracy}</span>
+      <span style="opacity:0.5;font-size:11px">${date}</span>
+    </div>`;
+  }).join('');
+}
+function lbShow() {
+  lbRender();
+  if (hud.leaderboardOverlay) hud.leaderboardOverlay.classList.remove('hide');
+}
+function lbHide() {
+  if (hud.leaderboardOverlay) hud.leaderboardOverlay.classList.add('hide');
+}
+function lbSaveRun() {
+  const r = game.analytics.sessionRollup();
+  lbSave({
+    score: game.score,
+    level: game.levelIdx + 1,
+    wave: game.wave,
+    time: r.durationSec,
+    accuracy: r.counters.shots > 0
+      ? ((r.counters.hits / r.counters.shots) * 100).toFixed(1) + '%' : '—',
+    date: Date.now(),
+  });
+}
 // v8: continue system state
 game.continueUsed = false;
 game.continueTimer = null;
@@ -693,6 +749,11 @@ document.getElementById('winRestart').addEventListener('click', startGame);
 // v8: wire continue buttons once
 initContinueButtons();
 
+// v8: leaderboard buttons
+document.getElementById('lbClose')?.addEventListener('click', lbHide);
+document.getElementById('goLbBtn')?.addEventListener('click', lbShow);
+document.getElementById('titleLbBtn')?.addEventListener('click', lbShow);
+
 // ─── fire / dash ──────────────────────────────────────────────────────────────
 function fireNow() {
   const p = game.player;
@@ -886,6 +947,9 @@ function enterLevel(idx) {
   if (!cfg) return;
   game.levelIdx = idx;
   game.killsInLevel = 0;
+  // v8: reset wave kills on new level (wave counter continues across levels)
+  game.waveKills = 0;
+  game.waveKillTarget = 10;
   // v8: track highest level reached
   if (idx > game.maxLevel) game.maxLevel = idx;
   if (game.propRoot) clearPropRoot(scene, game.propRoot);
@@ -1568,9 +1632,14 @@ function killEnemy(idx) {
   const gained = Math.round(baseScore * cRes.mult * scoreMult);
   game.score += gained;
   game.killsInLevel += 1;
+  game.waveKills += 1;
   game.analytics.emit('kill', { kind: e.kind, gained, score: game.score });
   // v8: check first-kill achievement
   if (game.analytics.counters.kills === 1) game.achievements.check(buildRunStats());
+  // v8: small shake on kill (combo tier 3+ gets bigger shake)
+  if (cRes.tier >= 3) shakeCamera(camera, 0.08, 150);
+  // v8: wave progression check
+  checkWaveAdvance();
 
   // xp gem: value scales with enemy score tier; 1 / 2 / 5
   const tier = baseScore >= 20 ? 5 : (baseScore >= 15 ? 2 : 1);
@@ -1607,6 +1676,29 @@ function killEnemy(idx) {
       nextLevel();
     }
   }
+}
+
+// v8: wave progression within a level
+// Each wave increases enemy cap and spawn speed; every WAVES_PER_LEVEL waves triggers level advance
+const WAVES_PER_LEVEL = 3;  // waves before level change (overridden by kill target from LEVELS config)
+
+function checkWaveAdvance() {
+  if (game.waveKills < game.waveKillTarget) return;
+  if (game.boss) return; // don't advance during boss fight
+
+  game.wave += 1;
+  game.waveKills = 0;
+  // Scale kill target: +5 per wave, cap at 30
+  game.waveKillTarget = Math.min(10 + (game.wave - 1) * 5, 30);
+  // Scale enemy cap: +2 per wave, cap at 20
+  game.enemyCap = Math.min(12 + (game.wave - 1) * 2, 20);
+  // Reduce spawn interval slightly each wave (handled by waveTimer scaling in tick)
+
+  if (hud.waveNum) hud.waveNum.textContent = game.wave;
+  showBanner(`WAVE ${game.wave}`);
+  shakeCamera(camera, 0.12, 400);
+  sfx.waveStart?.();
+  game.analytics.emit('waveAdvance', { wave: game.wave, level: game.levelIdx });
 }
 
 function nextLevel() {
@@ -1681,6 +1773,8 @@ function damagePlayer(n) {
   p.iFrames = 0.5;
   sfx.hurt();
   flashDamage();
+  // v8: screen shake on player damage (intensity scales with damage)
+  shakeCamera(camera, Math.min(0.15 + n * 0.005, 0.4), 300);
   game.floaters.spawn(new THREE.Vector3(p.x, 2, p.z), `-${n}`, '#FF4040', false);
   game.analytics.emit('hurt', { dmg: n, hp: Math.max(0, p.hp) });
   if (p.hp <= 0) {
@@ -1723,6 +1817,7 @@ function winGame() {
   }
   game.analytics.emit('win', { score: game.score });
   game.analytics.saveSession('win');
+  lbSaveRun();
 
   // v8: populate win stats card
   const r = game.analytics.sessionRollup();
@@ -1762,11 +1857,12 @@ function endGame(reason) {
   }
   game.analytics.emit('death', { score: game.score, level: game.levelIdx });
   game.analytics.saveSession(reason);
+  lbSaveRun();
 
   // v8: populate game over stats card
   const r = game.analytics.sessionRollup();
   hud.goScore.textContent = game.score;
-  hud.goLevel.textContent = game.levelIdx + 1;
+  hud.goLevel.textContent = `${game.levelIdx + 1} (Wave ${game.wave})`;
   if (hud.goTime) hud.goTime.textContent = fmtTime(r.durationSec);
   if (hud.goAccuracy) hud.goAccuracy.textContent = r.counters.shots > 0
     ? ((r.counters.hits / r.counters.shots) * 100).toFixed(1) + '%' : '—';
@@ -1868,6 +1964,7 @@ function startGame() {
   hud.goOverlay.classList.add('hide');
   hud.winOverlay.classList.add('hide');
   if (hud.continueOverlay) hud.continueOverlay.classList.add('hide');
+  if (hud.leaderboardOverlay) hud.leaderboardOverlay.classList.add('hide');
   hud.bossbar.classList.remove('show');
   game.picker.hide();
   // v8: clear scenery props
@@ -1897,6 +1994,12 @@ function startGame() {
   game.score = 0;
   game.levelIdx = 0;
   game.killsInLevel = 0;
+  // v8: reset wave state
+  game.wave = 1;
+  game.waveKills = 0;
+  game.waveKillTarget = 10;
+  game.enemyCap = 12;
+  if (hud.waveNum) hud.waveNum.textContent = '1';
   // 3.2s warm-up so the player can get oriented, test movement, and feel
   // agency before the first enemy appears. Subsequent waves use 0.6–1.5s.
   game.waveTimer = 3.2;

@@ -577,6 +577,10 @@
         <div class="timer"><span id="comboTimer" style="width:0%"></span></div>
       </div>
       <div class="stat panel" id="buffs"></div>
+      <div class="stat panel" id="waveChip" style="min-width:0">
+        <span class="label">Wave</span>
+        <span class="value" id="waveNum">1</span>
+      </div>
     </div>
   </div>
 
@@ -602,6 +606,7 @@
       <p class="hint controls-desktop">Click <b>Start</b> to unlock audio + pointer.</p>
       <p class="hint controls-touch" style="display:none">Tap <b>Start</b> to begin.</p>
       <button id="startBtn">Start</button>
+      <button id="titleLbBtn" style="background:var(--gold);margin-top:6px">&#x1F3C6; Leaderboard</button>
       <p class="hint">Hi-Score: <span id="titleHi">0</span></p>
     </div>
   </div>
@@ -633,7 +638,10 @@
         <div>&#x1F525; Best Combo: <b><span id="goBestCombo">x1</span></b></div>
         <div>&#x2B50; Hi-Score: <b><span id="goHi">0</span></b></div>
       </div>
-      <button id="restartBtn">Try again</button>
+      <div style="display:flex;gap:10px;justify-content:center;margin-top:4px">
+        <button id="restartBtn">Try again</button>
+        <button id="goLbBtn" style="background:var(--gold)">&#x1F3C6; Leaderboard</button>
+      </div>
     </div>
   </div>
 
@@ -667,6 +675,15 @@
   </div>
 
   <div id="levelBanner" class="level-banner"></div>
+
+  <!-- v8: Leaderboard overlay -->
+  <div id="leaderboard" class="overlay hide">
+    <div class="card" style="min-width:280px;max-width:420px">
+      <h1>&#x1F3C6; Top Runs</h1>
+      <div id="lbList" style="font-size:13px;line-height:1.9;margin:10px 0"></div>
+      <button id="lbClose">Close</button>
+    </div>
+  </div>
 
   <!-- v8: Achievement toast container -->
   <div id="achievementToasts" style="position:fixed;top:80px;right:16px;display:flex;flex-direction:column;gap:8px;pointer-events:none;z-index:200"></div>
