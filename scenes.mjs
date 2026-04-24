@@ -13,6 +13,7 @@ export const LEVELS = [
     fog: [0x7FC4E0, 45, 85],
     hemiTop: 0xFFF4D6, hemiBot: 0xE8D7A8, hemiI: 0.55,
     sunColor: 0xFFFFFF, sunI: 0.95,
+    floorKind: 'desert',
     props: ['cactus', 'rock'],
     propCount: 22,
     enemyMix: [
@@ -29,6 +30,7 @@ export const LEVELS = [
     fog: [0xE8F4F8, 40, 75],
     hemiTop: 0xFFFFFF, hemiBot: 0xE8F4F8, hemiI: 0.65,
     sunColor: 0xFFFFFF, sunI: 0.85,
+    floorKind: 'lab',
     props: ['toilet', 'pipe', 'tile'],
     propCount: 28,
     enemyMix: [
@@ -45,6 +47,7 @@ export const LEVELS = [
     fog: [0x1A2E22, 30, 60],
     hemiTop: 0x6FA63E, hemiBot: 0x1A2E22, hemiI: 0.4,
     sunColor: 0x9DD96A, sunI: 0.5,
+    floorKind: 'sewer',
     props: ['pipe', 'grate', 'puddle'],
     propCount: 26,
     enemyMix: [
@@ -58,6 +61,100 @@ export const LEVELS = [
 ];
 
 // ─── Environment swap ─────────────────────────────────────────────────────────
+
+
+// ─── Floor shader ─────────────────────────────────────────────────────────────
+
+export function makeFloorMaterial(THREE, kind) {
+  const vertexShader = /* glsl */`
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+
+  if (kind === 'desert') {
+    return new THREE.ShaderMaterial({
+      uniforms: {},
+      vertexShader,
+      fragmentShader: /* glsl */`
+        varying vec2 vUv;
+        void main() {
+          vec3 sandColor = vec3(0.910, 0.843, 0.659);
+          float ripple = vUv.y + sin(vUv.x * 20.0) * 0.02;
+          float brightness = 0.88 + ripple * 0.12;
+          gl_FragColor = vec4(sandColor * brightness, 1.0);
+        }
+      `,
+    });
+  }
+
+  if (kind === 'lab') {
+    return new THREE.ShaderMaterial({
+      uniforms: {},
+      vertexShader,
+      fragmentShader: /* glsl */`
+        varying vec2 vUv;
+        void main() {
+          vec3 baseColor = vec3(0.941, 0.929, 0.898);
+          vec2 grid = fract(vUv * 8.0);
+          float line = step(grid.x, 0.05) + step(grid.y, 0.05);
+          float brightness = mix(1.0, 0.6, clamp(line, 0.0, 1.0));
+          gl_FragColor = vec4(baseColor * brightness, 1.0);
+        }
+      `,
+    });
+  }
+
+  if (kind === 'sewer') {
+    return new THREE.ShaderMaterial({
+      uniforms: {},
+      vertexShader,
+      fragmentShader: /* glsl */`
+        varying vec2 vUv;
+        void main() {
+          vec3 baseColor = vec3(0.227, 0.333, 0.282);
+          float spec = smoothstep(0.3, 0.7, vUv.y) * 0.25;
+          gl_FragColor = vec4(baseColor + vec3(spec), 1.0);
+        }
+      `,
+    });
+  }
+
+  if (kind === 'swamp') {
+    return new THREE.ShaderMaterial({
+      uniforms: {},
+      vertexShader,
+      fragmentShader: /* glsl */`
+        varying vec2 vUv;
+        void main() {
+          vec3 baseColor = vec3(0.231, 0.420, 0.169);
+          float mud = sin(vUv.x * 14.0) * sin(vUv.y * 14.0) * 0.06;
+          gl_FragColor = vec4(baseColor + vec3(mud), 1.0);
+        }
+      `,
+    });
+  }
+
+  if (kind === 'void') {
+    return new THREE.ShaderMaterial({
+      uniforms: {},
+      vertexShader,
+      fragmentShader: /* glsl */`
+        varying vec2 vUv;
+        void main() {
+          vec3 baseColor = vec3(0.102, 0.039, 0.180);
+          float glow = pow(sin(vUv.x * 12.0) * sin(vUv.y * 12.0) * 0.5 + 0.5, 3.0) * 0.2;
+          gl_FragColor = vec4(baseColor + vec3(glow * 0.4, 0.0, glow), 1.0);
+        }
+      `,
+    });
+  }
+
+  // fallback
+  return new THREE.MeshLambertMaterial({ color: 0xE8D7A8 });
+}
 
 export function applyLevel(scene, hemi, sun, cfg, ctx) {
   const { THREE, ARENA, toon } = ctx;
@@ -88,9 +185,10 @@ export function applyLevel(scene, hemi, sun, cfg, ctx) {
     oldFloor.material.dispose();
     scene.remove(oldFloor);
   }
-  const floorGeo = new THREE.PlaneGeometry(ARENA * 2, ARENA * 2, 1, 1);
+  const floorGeo = new THREE.PlaneGeometry(ARENA * 2, ARENA * 2, 32, 32);
   floorGeo.rotateX(-Math.PI / 2);
-  const floor = new THREE.Mesh(floorGeo, toon(cfg.floor));
+  const floorMat = cfg.floorKind ? makeFloorMaterial(THREE, cfg.floorKind) : toon(cfg.floor);
+  const floor = new THREE.Mesh(floorGeo, floorMat);
   floor.name = 'floor';
   scene.add(floor);
 
