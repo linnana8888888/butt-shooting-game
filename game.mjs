@@ -9,6 +9,7 @@ import {
 import {
   createFloaters, createCombo, createPowerups,
   buildClogKing, clogKingAI, beanRainTick,
+  flashDamage, updateVignette, shakeCamera,
 } from './juice.mjs';
 import { buildButt, makePlayer, tryShoot, startReload, updateReload, readMoveInput, applyMove } from './player.mjs';
 import { createCamera } from './camera.mjs';
@@ -1140,6 +1141,7 @@ function updateGame(dt, now) {
       damagePlayer,
       spawnPoof,
       sfx,
+      onPhaseChange: (phase) => shakeCamera(camera, 0.4, 500),
     });
   }
 
@@ -1263,6 +1265,8 @@ function renderHud() {
   const p = game.player;
   if (!p) return;
   hud.hpbar.style.width = `${Math.max(0, (p.hp / p.maxHp) * 100)}%`;
+  // v7: dynamic vignette
+  updateVignette(p.hp / p.maxHp);
 
   const magRatio = p.mag.reloading ? (1 - p.mag.reloadT / p.mag.reloadTime) : (p.mag.cur / p.mag.max);
   const circumference = 2 * Math.PI * 17; // ≈106.81
@@ -1428,6 +1432,7 @@ function damagePlayer(n) {
   p.hp -= n;
   p.iFrames = 0.5;
   sfx.hurt();
+  flashDamage();
   game.floaters.spawn(new THREE.Vector3(p.x, 2, p.z), `-${n}`, '#FF4040', false);
   game.analytics.emit('hurt', { dmg: n, hp: Math.max(0, p.hp) });
   if (p.hp <= 0) {

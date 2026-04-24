@@ -352,6 +352,7 @@ export function clogKingAI(boss, player, dt, api) {
   if (b.phase !== prevPhase) {
     api.sfx?.hurt?.();
     api.spawnPoof(boss.position.x, boss.position.z, 0xA63E3E, 14);
+    api.onPhaseChange?.(b.phase);
   }
 
   // phase params
@@ -444,4 +445,44 @@ export function beanRainTick(game, dt, dropBeanPickupFn) {
     const z = game.player.z + Math.sin(angle) * radius;
     dropBeanPickupFn(x, z, 2);
   }
+}
+
+// ─── 7. SCREEN EFFECTS (v7) ───────────────────────────────────────────────────
+
+export function flashDamage() {
+  const el = document.getElementById('dmg-flash');
+  if (!el) return;
+  el.style.background = 'rgba(255,0,0,0.4)';
+  setTimeout(() => { el.style.background = 'rgba(255,0,0,0)'; }, 150);
+}
+
+export function updateVignette(hpFraction) {
+  const el = document.getElementById('vignette');
+  if (!el) return;
+  const opacity = (1 - Math.max(0, Math.min(1, hpFraction))) * 0.7;
+  el.style.background = `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${opacity.toFixed(3)}) 100%)`;
+}
+
+export function shakeCamera(camera, intensity, duration) {
+  const startTime = performance.now();
+  const origX = camera.position.x;
+  const origZ = camera.position.z;
+  let lastX = origX, lastZ = origZ;
+  function _shake() {
+    const elapsed = performance.now() - startTime;
+    if (elapsed >= duration) {
+      camera.position.x -= lastX - origX;
+      camera.position.z -= lastZ - origZ;
+      return;
+    }
+    const frac = 1 - elapsed / duration;
+    const ox = (Math.random() - 0.5) * 2 * intensity * frac;
+    const oz = (Math.random() - 0.5) * 2 * intensity * frac;
+    camera.position.x = origX + ox;
+    camera.position.z = origZ + oz;
+    lastX = camera.position.x;
+    lastZ = camera.position.z;
+    requestAnimationFrame(_shake);
+  }
+  requestAnimationFrame(_shake);
 }
