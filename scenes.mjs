@@ -1,12 +1,15 @@
 // scenes.mjs — levels, props, new enemies
 // Agent B implementation — see CONTRACTS.md → scenes.mjs
 
+import { SkyDome } from './skydome.mjs';
+
 // ─── Level configs ────────────────────────────────────────────────────────────
 
 export const LEVELS = [
   {
     id: 0, name: 'Desert Dunes', kills: 20,
     sky: 0x7FC4E0, floor: 0xE8D7A8, ring: 0xC7B383,
+    skyTop: 0xFF6B35, skyBot: 0xFFD166,
     fog: [0x7FC4E0, 45, 85],
     hemiTop: 0xFFF4D6, hemiBot: 0xE8D7A8, hemiI: 0.55,
     sunColor: 0xFFFFFF, sunI: 0.95,
@@ -22,6 +25,7 @@ export const LEVELS = [
   {
     id: 1, name: 'Porcelain Lab', kills: 30,
     sky: 0xE8F4F8, floor: 0xF0EDE5, ring: 0xD8D2C8,
+    skyTop: 0xC8E8F4, skyBot: 0xFFFFFF,
     fog: [0xE8F4F8, 40, 75],
     hemiTop: 0xFFFFFF, hemiBot: 0xE8F4F8, hemiI: 0.65,
     sunColor: 0xFFFFFF, sunI: 0.85,
@@ -37,6 +41,7 @@ export const LEVELS = [
   {
     id: 2, name: 'Sewer Depths', kills: 40,
     sky: 0x2D4A3E, floor: 0x3A5548, ring: 0x223028,
+    skyTop: 0x0D1B2A, skyBot: 0x1A3A2A,
     fog: [0x1A2E22, 30, 60],
     hemiTop: 0x6FA63E, hemiBot: 0x1A2E22, hemiI: 0.4,
     sunColor: 0x9DD96A, sunI: 0.5,
@@ -60,6 +65,14 @@ export function applyLevel(scene, hemi, sun, cfg, ctx) {
   // background + fog
   scene.background = new THREE.Color(cfg.sky);
   scene.fog = new THREE.Fog(cfg.fog[0], cfg.fog[1], cfg.fog[2]);
+
+  // skydome
+  if (ctx.skyDome) {
+    ctx.skyDome.setColors(cfg.skyTop ?? cfg.sky, cfg.skyBot ?? cfg.sky);
+  } else {
+    ctx.skyDome = new SkyDome(scene, THREE);
+    ctx.skyDome.setColors(cfg.skyTop ?? cfg.sky, cfg.skyBot ?? cfg.sky);
+  }
 
   // lights
   hemi.color.setHex(cfg.hemiTop);
