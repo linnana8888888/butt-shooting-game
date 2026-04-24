@@ -763,6 +763,16 @@ function spawnEnemyForLevel() {
   const hp = enemy.userData.stats.hp * hpMult;
   const record = { obj: enemy, kind, hp, stats: enemy.userData.stats };
   applyOutfit(record);
+  // v7: glow phase
+  enemy.userData.glowPhase = Math.random() * Math.PI * 2;
+  // v7: shadow disc
+  const _sdGeo = new THREE.CircleGeometry(0.6, 16);
+  _sdGeo.rotateX(-Math.PI / 2);
+  const _sdMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3 });
+  const _sd = new THREE.Mesh(_sdGeo, _sdMat);
+  _sd.position.set(enemy.position.x, 0.05, enemy.position.z);
+  scene.add(_sd);
+  record.shadowDisc = _sd;
   game.enemies.push(record);
 }
 
@@ -788,6 +798,16 @@ function spawnWarmupDummy(spec) {
     tag: spec.tag || 'warmup_dummy',
   };
   applyOutfit(record);
+  // v7: glow phase
+  enemy.userData.glowPhase = Math.random() * Math.PI * 2;
+  // v7: shadow disc
+  const _wsdGeo = new THREE.CircleGeometry(0.6, 16);
+  _wsdGeo.rotateX(-Math.PI / 2);
+  const _wsdMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3 });
+  const _wsd = new THREE.Mesh(_wsdGeo, _wsdMat);
+  _wsd.position.set(enemy.position.x, 0.05, enemy.position.z);
+  scene.add(_wsd);
+  record.shadowDisc = _wsd;
   game.enemies.push(record);
   return record;
 }
@@ -1039,6 +1059,16 @@ function updateGame(dt, now) {
     e.obj.position.x += (dx / d) * spd * dt;
     e.obj.position.z += (dz / d) * spd * dt;
     e.obj.rotation.y = Math.atan2(dx, dz);
+    // v7: glow pulse
+    e.obj.traverse(child => {
+      if (child.isMesh && child.material && child.material.emissive) {
+        child.material.emissiveIntensity = 0.15 + 0.1 * Math.sin(now * 3 + (e.obj.userData.glowPhase || 0));
+      }
+    });
+    // v7: shadow disc follows enemy
+    if (e.shadowDisc) {
+      e.shadowDisc.position.set(e.obj.position.x, 0.05, e.obj.position.z);
+    }
     if (d < e.stats.radius + 0.5 && p.iFrames <= 0) {
       damagePlayer(e.stats.damage);
       // knockback
@@ -1202,6 +1232,13 @@ function updateBossHud() {
 function killEnemy(idx) {
   const e = game.enemies[idx];
   const ex = e.obj.position.x, ez = e.obj.position.z;
+  // v7: remove shadow disc
+  if (e.shadowDisc) {
+    scene.remove(e.shadowDisc);
+    e.shadowDisc.geometry.dispose();
+    e.shadowDisc.material.dispose();
+    e.shadowDisc = null;
+  }
   scene.remove(e.obj);
   e.obj.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
   game.enemies.splice(idx, 1);
@@ -1359,7 +1396,10 @@ function endGame(reason) {
 
 // ─── start / reset ────────────────────────────────────────────────────────────
 function resetScene() {
-  for (const e of game.enemies) scene.remove(e.obj);
+  for (const e of game.enemies) {
+    scene.remove(e.obj);
+    if (e.shadowDisc) { scene.remove(e.shadowDisc); e.shadowDisc.geometry.dispose(); e.shadowDisc.material.dispose(); }
+  }
   for (const b of game.projectiles) scene.remove(b.obj);
   for (const b of game.enemyBeans) scene.remove(b.obj);
   for (const p of game.pickups) scene.remove(p.obj);
