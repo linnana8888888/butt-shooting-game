@@ -58,6 +58,41 @@ export const LEVELS = [
     musicIdx: 2,
     boss: 'clog_king',
   },
+  {
+    id: 3, name: 'Toxic Swamp', kills: 50,
+    sky: 0x2D4A1E, floor: 0x3A6B2A, ring: 0x1E3A14,
+    skyTop: 0x2D4A1E, skyBot: 0x4A7A2E,
+    fog: [0x2D4A1E, 25, 55],
+    hemiTop: 0x4A7A2E, hemiBot: 0x1E3A14, hemiI: 0.5,
+    sunColor: 0x88CC44, sunI: 0.6,
+    floorKind: 'swamp',
+    props: ['deadTree', 'lilyPad', 'toxicBarrel'],
+    propCount: 24,
+    enemyMix: [
+      { kind: 'swampGas',   weight: 0.30 },
+      { kind: 'mudCrawler', weight: 0.40 },
+      { kind: 'buttling',   weight: 0.30 },
+    ],
+    musicIdx: 1,
+  },
+  {
+    id: 4, name: 'Void Dimension', kills: 60,
+    sky: 0x000000, floor: 0x1A0A2E, ring: 0x0D0518,
+    skyTop: 0x000000, skyBot: 0x0D0518,
+    fog: [0x000000, 20, 50],
+    hemiTop: 0x6600CC, hemiBot: 0x000000, hemiI: 0.4,
+    sunColor: 0xAA44FF, sunI: 0.7,
+    floorKind: 'void',
+    props: ['crystalShard', 'voidPortal'],
+    propCount: 20,
+    enemyMix: [
+      { kind: 'voidShard',   weight: 0.35 },
+      { kind: 'shadowClone', weight: 0.35 },
+      { kind: 'buttling',    weight: 0.30 },
+    ],
+    musicIdx: 2,
+    boss: 'mega_clog_king',
+  },
 ];
 
 // ─── Environment swap ─────────────────────────────────────────────────────────
@@ -390,6 +425,99 @@ export function buildProp(kind, x, z, ctx) {
     puddle.rotation.x = -Math.PI / 2;
     puddle.position.y = 0.01;
     g.add(puddle);
+  } else if (kind === 'deadTree') {
+    // bare trunk
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.18, 2.2, 7),
+      toon(0x4A3728)
+    );
+    trunk.position.y = 1.1;
+    withOutline(trunk, 0.07);
+    g.add(trunk);
+    // gnarled branches
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2 + Math.random() * 0.5;
+      const branch = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.1, 0.9, 5),
+        toon(0x4A3728)
+      );
+      branch.position.set(Math.cos(a) * 0.3, 1.8 + i * 0.2, Math.sin(a) * 0.3);
+      branch.rotation.z = Math.cos(a) * 0.6;
+      branch.rotation.x = Math.sin(a) * 0.6;
+      g.add(branch);
+    }
+
+  } else if (kind === 'lilyPad') {
+    const pad = new THREE.Mesh(
+      new THREE.CircleGeometry(0.6 + Math.random() * 0.2, 10),
+      toon(0x4A8A2A, { transparent: true, opacity: 0.85 })
+    );
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.y = 0.02;
+    g.add(pad);
+    // small flower
+    const flower = new THREE.Mesh(
+      new THREE.SphereGeometry(0.1, 6, 5),
+      toon(0xFFFF88, { emissive: 0xFFFF00, emissiveIntensity: 0.3 })
+    );
+    flower.position.set(0.1, 0.12, 0.1);
+    g.add(flower);
+
+  } else if (kind === 'toxicBarrel') {
+    const barrel = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.28, 0.3, 0.8, 10),
+      toon(0x556B2F)
+    );
+    barrel.position.y = 0.4;
+    withOutline(barrel, 0.07);
+    g.add(barrel);
+    // toxic ooze top
+    const ooze = new THREE.Mesh(
+      new THREE.CircleGeometry(0.22, 10),
+      toon(0x88FF00, { emissive: 0x44AA00, emissiveIntensity: 0.5, transparent: true, opacity: 0.9 })
+    );
+    ooze.rotation.x = -Math.PI / 2;
+    ooze.position.y = 0.82;
+    g.add(ooze);
+    // hazard stripe
+    const stripe = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.29, 0.31, 0.12, 10),
+      toon(0xFFFF00)
+    );
+    stripe.position.y = 0.55;
+    g.add(stripe);
+
+  } else if (kind === 'crystalShard') {
+    const heights = [1.4, 0.9, 1.1];
+    for (let i = 0; i < 3; i++) {
+      const shard = new THREE.Mesh(
+        new THREE.ConeGeometry(0.12 + i * 0.04, heights[i], 5),
+        toon(0xAA44FF, { emissive: 0x6600CC, emissiveIntensity: 0.5 })
+      );
+      shard.position.set((i - 1) * 0.22, heights[i] / 2, (i % 2) * 0.1);
+      shard.rotation.z = (i - 1) * 0.15;
+      withOutline(shard, 0.06);
+      g.add(shard);
+    }
+
+  } else if (kind === 'voidPortal') {
+    // swirling dark ring
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.7, 0.12, 8, 24),
+      toon(0x6600CC, { emissive: 0x330066, emissiveIntensity: 0.8 })
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.7;
+    withOutline(ring, 0.08);
+    g.add(ring);
+    // dark void center
+    const center = new THREE.Mesh(
+      new THREE.CircleGeometry(0.55, 20),
+      toon(0x000000, { transparent: true, opacity: 0.85 })
+    );
+    center.rotation.x = -Math.PI / 2;
+    center.position.y = 0.7;
+    g.add(center);
   }
 
   return g;

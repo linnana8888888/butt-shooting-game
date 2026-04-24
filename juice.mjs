@@ -486,3 +486,237 @@ export function shakeCamera(camera, intensity, duration) {
   }
   requestAnimationFrame(_shake);
 }
+
+// ─── 8. MEGA CLOG KING (v7) ───────────────────────────────────────────────────
+
+export function buildMegaClogKing(ctx) {
+  const { THREE, C, toon, withOutline, blobShadow } = ctx;
+  const g = new THREE.Group();
+  g.name = 'megaClogKing';
+
+  // Larger version of Clog King — 1.4x scale feel
+  const bodyGeo = new THREE.CylinderGeometry(2.2, 2.6, 3.6, 16);
+  const body = new THREE.Mesh(bodyGeo, toon(C.porcelain));
+  body.position.y = 1.8;
+  withOutline(body, 0.06);
+  g.add(body);
+
+  const tank = new THREE.Mesh(
+    new THREE.BoxGeometry(2.8, 2.8, 1.4),
+    toon(C.porcelain)
+  );
+  tank.position.set(0, 4.2, 1.4);
+  withOutline(tank, 0.06);
+  g.add(tank);
+
+  const waterDisc = new THREE.Mesh(
+    new THREE.CircleGeometry(1.75, 20),
+    toon(C.sewerDark, { emissive: C.sewerDark, emissiveIntensity: 0.4 })
+  );
+  waterDisc.rotation.x = -Math.PI / 2;
+  waterDisc.position.y = 3.65;
+  g.add(waterDisc);
+
+  const seat = new THREE.Mesh(
+    new THREE.TorusGeometry(2.0, 0.35, 8, 24),
+    toon(C.ink)
+  );
+  seat.rotation.x = Math.PI / 2;
+  seat.position.y = 3.65;
+  g.add(seat);
+
+  // void-purple crown spikes
+  const crownRad = 2.3;
+  for (let i = 0; i < 10; i++) {
+    const angle = (i / 10) * Math.PI * 2;
+    const spike = new THREE.Mesh(
+      new THREE.ConeGeometry(0.25, 0.75, 6),
+      toon(0x9933FF, { emissive: 0x6600CC, emissiveIntensity: 0.5 })
+    );
+    spike.position.set(
+      Math.cos(angle) * crownRad,
+      4.15,
+      Math.sin(angle) * crownRad
+    );
+    withOutline(spike, 0.08);
+    g.add(spike);
+  }
+
+  // glowing eyes
+  for (const sx of [-0.7, 0.7]) {
+    const eyeWhite = new THREE.Mesh(
+      new THREE.SphereGeometry(0.42, 10, 8),
+      toon(C.porcelain)
+    );
+    eyeWhite.position.set(sx, 4.5, 0.73);
+    g.add(eyeWhite);
+
+    const pupil = new THREE.Mesh(
+      new THREE.SphereGeometry(0.22, 8, 6),
+      new THREE.MeshBasicMaterial({ color: 0x9933FF })
+    );
+    pupil.position.set(sx, 4.5, 1.0);
+    g.add(pupil);
+
+    const brow = new THREE.Mesh(
+      new THREE.BoxGeometry(0.52, 0.14, 0.1),
+      new THREE.MeshBasicMaterial({ color: C.ink })
+    );
+    const side = sx > 0 ? 1 : -1;
+    brow.position.set(sx, 4.9, 0.76);
+    brow.rotation.z = side * 0.35;
+    g.add(brow);
+  }
+
+  for (const sx of [-2.4, 2.4]) {
+    const bulge = new THREE.Mesh(
+      new THREE.SphereGeometry(0.95, 10, 8),
+      toon(0x6600CC)
+    );
+    bulge.scale.set(1, 0.85, 1);
+    bulge.position.set(sx, 2.2, 0);
+    withOutline(bulge, 0.06);
+    g.add(bulge);
+  }
+
+  for (const sx of [-1.0, 1.0]) {
+    const leg = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.35, 0.42, 1.0, 8),
+      toon(C.ink)
+    );
+    leg.position.set(sx, 0.5, 0);
+    g.add(leg);
+  }
+
+  g.add(blobShadow(3.0));
+
+  g.userData.boss = {
+    hp: 150, maxHp: 150, phase: 0,
+    chargeCd: 2.0, ringCd: 4.0,
+    chargeVx: 0, chargeVz: 0, chargeT: 0,
+    _ringTimer: 0, _chargeTimer: 0,
+    _voidSpawnTimer: 0,
+    isMega: true,
+  };
+
+  return g;
+}
+
+export function megaClogKingAI(boss, player, dt, api) {
+  const b = boss.userData.boss;
+  if (!b) return;
+
+  const hpPct = b.hp / b.maxHp;
+  let prevPhase = b.phase;
+
+  // 4 phases: 0 = full, 1 = <100/150, 2 = <60/150, 3 = <20/150
+  if (hpPct > (100 / 150))      b.phase = 0;
+  else if (hpPct > (60 / 150))  b.phase = 1;
+  else if (hpPct > (20 / 150))  b.phase = 2;
+  else                           b.phase = 3;
+
+  if (b.phase !== prevPhase) {
+    api.sfx?.hurt?.();
+    api.spawnPoof(boss.position.x, boss.position.z, 0x9933FF, 18);
+    api.onPhaseChange?.(b.phase);
+  }
+
+  const phases = [
+    { drift: 1.4, ringInterval: 4.0, ringCount: 18, ringSpeed: 11, ringDmg: 6,  chargeInterval: 2.0, chargeSpeed: 15, chargeDmg: 20 },
+    { drift: 1.8, ringInterval: 3.0, ringCount: 22, ringSpeed: 13, ringDmg: 8,  chargeInterval: 1.6, chargeSpeed: 19, chargeDmg: 22 },
+    { drift: 2.4, ringInterval: 2.2, ringCount: 26, ringSpeed: 15, ringDmg: 9,  chargeInterval: 1.2, chargeSpeed: 23, chargeDmg: 24 },
+    { drift: 4.0, ringInterval: 1.5, ringCount: 30, ringSpeed: 18, ringDmg: 12, chargeInterval: 0.8, chargeSpeed: 30, chargeDmg: 28 },
+  ];
+  const p = phases[b.phase];
+
+  const dx = player.x - boss.position.x;
+  const dz = player.z - boss.position.z;
+  const dist = Math.sqrt(dx * dx + dz * dz) || 1;
+
+  // charging movement
+  if (b.chargeT > 0) {
+    b.chargeT -= dt;
+    boss.position.x += b.chargeVx * dt;
+    boss.position.z += b.chargeVz * dt;
+    const cx = player.x - boss.position.x;
+    const cz = player.z - boss.position.z;
+    if (cx * cx + cz * cz < 5) {
+      api.damagePlayer(p.chargeDmg);
+      api.spawnPoof(player.x, player.z, 0xFF5FA2, 10);
+      b.chargeT = 0;
+    }
+    if (b.chargeT <= 0) { b.chargeVx = 0; b.chargeVz = 0; }
+  } else {
+    boss.position.x += (dx / dist) * p.drift * dt;
+    boss.position.z += (dz / dist) * p.drift * dt;
+  }
+
+  boss.rotation.y = Math.atan2(dx, dz);
+
+  b._chargeTimer -= dt;
+  if (b._chargeTimer <= 0) {
+    b._chargeTimer = p.chargeInterval;
+    if (b.chargeT <= 0) {
+      b.chargeVx = (dx / dist) * p.chargeSpeed;
+      b.chargeVz = (dz / dist) * p.chargeSpeed;
+      b.chargeT = 0.8;
+    }
+  }
+
+  b._ringTimer -= dt;
+  if (b._ringTimer <= 0) {
+    b._ringTimer = p.ringInterval;
+    const n = p.ringCount;
+    const offset = b.phase >= 2 ? (Math.PI / n) * ((Date.now() % 2)) : 0;
+    for (let i = 0; i < n; i++) {
+      const angle = offset + (i / n) * Math.PI * 2;
+      const ax = Math.cos(angle);
+      const az = Math.sin(angle);
+      api.spawnEnemyBean(
+        boss.position.x + ax * 2.5,
+        boss.position.z + az * 2.5,
+        ax, az,
+        p.ringSpeed,
+        p.ringDmg
+      );
+    }
+    api.sfx?.shot?.();
+  }
+
+  // Phase 2+: spawn 3 voidShards every 10s
+  if (b.phase >= 1) {
+    b._voidSpawnTimer -= dt;
+    if (b._voidSpawnTimer <= 0) {
+      b._voidSpawnTimer = 10.0;
+      if (api.spawnEnemyForLevel) {
+        // Inject voidShards directly
+        for (let i = 0; i < 3; i++) {
+          api.spawnEnemyForLevel('voidShard');
+        }
+      }
+    }
+  }
+
+  // Phase 3: flicker floor material
+  if (b.phase >= 2 && api.scene) {
+    const floorMesh = api.scene.getObjectByName('floor');
+    if (floorMesh && floorMesh.material && floorMesh.material.transparent !== undefined) {
+      floorMesh.material.opacity = 0.5 + Math.random() * 0.5;
+      floorMesh.material.transparent = true;
+    }
+  }
+
+  // Phase 4 (phase 3 in 0-indexed): add red tint
+  if (b.phase >= 3) {
+    let redTint = document.getElementById('mega-boss-tint');
+    if (!redTint) {
+      redTint = document.createElement('div');
+      redTint.id = 'mega-boss-tint';
+      redTint.style.cssText = 'position:fixed;inset:0;background:rgba(160,0,0,0.12);pointer-events:none;z-index:48;';
+      document.body.appendChild(redTint);
+    }
+  } else {
+    const redTint = document.getElementById('mega-boss-tint');
+    if (redTint) redTint.remove();
+  }
+}
