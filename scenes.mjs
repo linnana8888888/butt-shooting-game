@@ -191,7 +191,7 @@ export function makeFloorMaterial(THREE, kind) {
   return new THREE.MeshLambertMaterial({ color: 0xE8D7A8 });
 }
 
-export function applyLevel(scene, hemi, sun, cfg, ctx) {
+export function applyLevel(scene, hemi, sun, cfg, ctx, idx = 0) {
   const { THREE, ARENA, toon } = ctx;
 
   // background + fog

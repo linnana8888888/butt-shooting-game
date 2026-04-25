@@ -953,7 +953,7 @@ function enterLevel(idx) {
   // v8: track highest level reached
   if (idx > game.maxLevel) game.maxLevel = idx;
   if (game.propRoot) clearPropRoot(scene, game.propRoot);
-  const { propRoot } = applyLevel(scene, hemi, sun, cfg, ctx);
+  const { propRoot } = applyLevel(scene, hemi, sun, cfg, ctx, idx);
   game.propRoot = propRoot;
   hud.levelName.textContent = cfg.name;
   hud.levelProg.textContent = `0 / ${cfg.kills}`;
