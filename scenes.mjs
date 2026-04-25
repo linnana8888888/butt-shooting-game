@@ -1,7 +1,7 @@
 // scenes.mjs — levels, props, new enemies
 // Agent B implementation — see CONTRACTS.md → scenes.mjs
 
-import { SkyDome } from './skydome.mjs';
+import { createBackdrop } from './backdrop.mjs';
 
 // ─── Level configs ────────────────────────────────────────────────────────────
 
@@ -198,13 +198,11 @@ export function applyLevel(scene, hemi, sun, cfg, ctx) {
   scene.background = new THREE.Color(cfg.sky);
   scene.fog = new THREE.Fog(cfg.fog[0], cfg.fog[1], cfg.fog[2]);
 
-  // skydome
-  if (ctx.skyDome) {
-    ctx.skyDome.setColors(cfg.skyTop ?? cfg.sky, cfg.skyBot ?? cfg.sky);
-  } else {
-    ctx.skyDome = new SkyDome(scene, THREE);
-    ctx.skyDome.setColors(cfg.skyTop ?? cfg.sky, cfg.skyBot ?? cfg.sky);
+  // backdrop (v8: replaces skydome with 3D geometry)
+  if (!ctx.backdrop) {
+    ctx.backdrop = createBackdrop(scene);
   }
+  ctx.backdrop.loadLevel(idx);
 
   // lights
   hemi.color.setHex(cfg.hemiTop);

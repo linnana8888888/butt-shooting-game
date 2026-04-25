@@ -1735,7 +1735,14 @@ function killBoss() {
     spawnPoof(bx, bz, color, 14);
   }
   game.score += 500;
-  winGame();
+  // Only win if this was the final boss (Mega Clog King in level 4)
+  const isFinalBoss = game.levelIdx === LEVELS.length - 1;
+  if (isFinalBoss) {
+    winGame();
+  } else {
+    // Advance to next level after non-final boss
+    nextLevel();
+  }
 }
 
 function grabPickup(pk) {
