@@ -135,23 +135,54 @@ function death() {
 
 function comboTier(n) {
   if (notReady()) return;
-  // bell: sine with short attack, exp decay; freq rises with tier
-  const base = 660;
-  const freq = Math.min(base + 220 * n, 2500);
-  const fifth = freq * 1.5;
+  // v8: escalating combo sounds — each tier is more dramatic
+  // tier 1 (x2): simple bell
+  // tier 2 (x3): two-note chime
+  // tier 3 (x4): three-note ascending fanfare
+  // tier 4 (x5): full chord burst + noise hit
   const t = AC.currentTime;
-  [freq, fifth].forEach((f, idx) => {
-    const osc = AC.createOscillator();
-    const g = AC.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(f, t);
-    g.gain.setValueAtTime(0.001, t);
-    g.gain.linearRampToValueAtTime(idx === 0 ? 0.22 : 0.1, t + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
-    osc.connect(g); g.connect(masterGain);
-    osc.start(t); osc.stop(t + 0.52);
+
+  if (n <= 1) {
+    // x2 — simple bell
+    const freq = 880;
+    const osc = AC.createOscillator(); const g = AC.createGain();
+    osc.type = 'sine'; osc.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.001, t); g.gain.linearRampToValueAtTime(0.2, t + 0.01); g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+    osc.connect(g); g.connect(masterGain); osc.start(t); osc.stop(t + 0.42);
     osc.onended = () => { osc.disconnect(); g.disconnect(); };
-  });
+  } else if (n === 2) {
+    // x3 — two-note chime ascending
+    [[880, 0], [1100, 0.12]].forEach(([freq, delay]) => {
+      const osc = AC.createOscillator(); const g = AC.createGain();
+      osc.type = 'sine'; osc.frequency.setValueAtTime(freq, t + delay);
+      g.gain.setValueAtTime(0.001, t + delay); g.gain.linearRampToValueAtTime(0.22, t + delay + 0.01); g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.45);
+      osc.connect(g); g.connect(masterGain); osc.start(t + delay); osc.stop(t + delay + 0.47);
+      osc.onended = () => { osc.disconnect(); g.disconnect(); };
+    });
+  } else if (n === 3) {
+    // x4 — three-note ascending fanfare
+    [[880, 0], [1100, 0.1], [1320, 0.2]].forEach(([freq, delay]) => {
+      const osc = AC.createOscillator(); const g = AC.createGain();
+      osc.type = 'triangle'; osc.frequency.setValueAtTime(freq, t + delay);
+      g.gain.setValueAtTime(0.001, t + delay); g.gain.linearRampToValueAtTime(0.25, t + delay + 0.01); g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.5);
+      osc.connect(g); g.connect(masterGain); osc.start(t + delay); osc.stop(t + delay + 0.52);
+      osc.onended = () => { osc.disconnect(); g.disconnect(); };
+    });
+  } else {
+    // x5 — full chord burst + noise punch (maximum hype)
+    [[880, 1100, 1320, 1760]].flat().forEach((freq, idx) => {
+      const osc = AC.createOscillator(); const g = AC.createGain();
+      osc.type = idx % 2 === 0 ? 'sine' : 'triangle';
+      osc.frequency.setValueAtTime(freq, t);
+      g.gain.setValueAtTime(0.001, t); g.gain.linearRampToValueAtTime(0.18, t + 0.01); g.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+      osc.connect(g); g.connect(masterGain); osc.start(t); osc.stop(t + 0.72);
+      osc.onended = () => { osc.disconnect(); g.disconnect(); };
+    });
+    // noise punch for impact
+    noise(0.15, 'bandpass', 2000, 500, 0.3);
+    // extra high sparkle
+    tone(3520, 0.3, 'sine', 0.12);
+  }
 }
 
 // ─── MUSIC ────────────────────────────────────────────────────────────────────

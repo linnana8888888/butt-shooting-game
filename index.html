@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
-<title>Butt Shooting Game · v6</title>
+<title>Butt Shooting Game · v8</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&family=Fredoka+One&display=swap" rel="stylesheet">
@@ -577,6 +577,10 @@
         <div class="timer"><span id="comboTimer" style="width:0%"></span></div>
       </div>
       <div class="stat panel" id="buffs"></div>
+      <div class="stat panel" id="waveChip" style="min-width:0">
+        <span class="label">Wave</span>
+        <span class="value" id="waveNum">1</span>
+      </div>
     </div>
   </div>
 
@@ -594,7 +598,7 @@
 
   <div id="title" class="overlay">
     <div class="card">
-      <h1>BUTT SHOOTING · v6</h1>
+      <h1>BUTT SHOOTING · v8</h1>
       <p>Three levels. Unlimited beans. Boss fight.</p>
       <p class="controls-desktop">WASD move · Space fire · R reload · Shift dash · Q stomp · V camera · M mute</p>
       <p class="controls-touch" style="display:none">Joystick moves · FIRE to shoot · 🔄 reload · 🥾 stomp</p>
@@ -602,16 +606,42 @@
       <p class="hint controls-desktop">Click <b>Start</b> to unlock audio + pointer.</p>
       <p class="hint controls-touch" style="display:none">Tap <b>Start</b> to begin.</p>
       <button id="startBtn">Start</button>
+      <button id="titleLbBtn" style="background:var(--gold);margin-top:6px">&#x1F3C6; Leaderboard</button>
       <p class="hint">Hi-Score: <span id="titleHi">0</span></p>
     </div>
   </div>
 
+  <!-- v8: Continue screen -->
+  <div id="continueScreen" class="overlay hide">
+    <div class="card" style="text-align:center">
+      <h1>&#x1F480; FLUSHED</h1>
+      <p style="font-size:18px;font-weight:700">Continue?</p>
+      <p id="continueCountdown" style="font-size:48px;font-weight:700;color:var(--red);line-height:1">10</p>
+      <p style="font-size:13px;opacity:0.7">Score penalty: &minus;30%</p>
+      <div style="display:flex;gap:12px;justify-content:center;margin-top:12px">
+        <button id="continueBtn" style="background:var(--green)">CONTINUE</button>
+        <button id="continueSkipBtn">Give Up</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- v8: Game over with stats -->
   <div id="gameover" class="overlay hide">
     <div class="card">
       <h1>FLUSHED</h1>
       <p>Score: <span id="goScore">0</span></p>
       <p>Level reached: <span id="goLevel">1</span></p>
-      <button id="restartBtn">Try again</button>
+      <div id="goStats" style="margin:10px 0;padding:8px;background:#0001;border-radius:10px;font-size:13px;line-height:1.7">
+        <div>&#x23F1; Time: <b><span id="goTime">0s</span></b></div>
+        <div>&#x1F3AF; Accuracy: <b><span id="goAccuracy">&mdash;</span></b></div>
+        <div>&#x1F480; Kills: <b><span id="goKills">0</span></b></div>
+        <div>&#x1F525; Best Combo: <b><span id="goBestCombo">x1</span></b></div>
+        <div>&#x2B50; Hi-Score: <b><span id="goHi">0</span></b></div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:center;margin-top:4px">
+        <button id="restartBtn">Try again</button>
+        <button id="goLbBtn" style="background:var(--gold)">&#x1F3C6; Leaderboard</button>
+      </div>
     </div>
   </div>
 
@@ -620,6 +650,12 @@
       <h1>YOU CLEANED</h1>
       <h2>THE KINGDOM</h2>
       <p>Final score: <span id="winScore">0</span></p>
+      <div id="winStats" style="margin:10px 0;padding:8px;background:#0001;border-radius:10px;font-size:13px;line-height:1.7">
+        <div>&#x23F1; Time: <b><span id="winTime">0s</span></b></div>
+        <div>&#x1F3AF; Accuracy: <b><span id="winAccuracy">&mdash;</span></b></div>
+        <div>&#x1F480; Total Kills: <b><span id="winKills">0</span></b></div>
+        <div>&#x1F525; Best Combo: <b><span id="winBestCombo">x1</span></b></div>
+      </div>
       <p>The throne is empty. For now.</p>
       <button id="winRestart">Play again</button>
     </div>
@@ -640,6 +676,18 @@
 
   <div id="levelBanner" class="level-banner"></div>
 
+  <!-- v8: Leaderboard overlay -->
+  <div id="leaderboard" class="overlay hide">
+    <div class="card" style="min-width:280px;max-width:420px">
+      <h1>&#x1F3C6; Top Runs</h1>
+      <div id="lbList" style="font-size:13px;line-height:1.9;margin:10px 0"></div>
+      <button id="lbClose">Close</button>
+    </div>
+  </div>
+
+  <!-- v8: Achievement toast container -->
+  <div id="achievementToasts" style="position:fixed;top:80px;right:16px;display:flex;flex-direction:column;gap:8px;pointer-events:none;z-index:200"></div>
+
   <div id="mobileControls">
     <div id="joystick"><div id="joyStick"></div></div>
     <div id="mbGroup">
@@ -652,7 +700,10 @@
   </div>
 
   <script type="importmap">
-    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    { "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/examples/jsm/loaders/GLTFLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
+      } }
   </script>
   <script type="module" src="./game.mjs"></script>
 </body>
