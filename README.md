@@ -1,11 +1,27 @@
-# Butt Shooting Game v7
+# Butt Shooting Game v8
 
-Arcade-style 3D shooter built with Three.js. Three themed levels, a boss fight, survivor.io-style upgrade loop, combo system, mobile touch controls, and analytics — all in vanilla ES modules, no bundler.
+Arcade-style 3D shooter built with Three.js. Five themed levels, two boss fights, survivor.io-style upgrade loop, combo system, achievement unlocks, mobile touch controls, and analytics — all in vanilla ES modules, no bundler.
 
-Made and iterated by [code-play studio](https://github.com/linnana8888888/code-play) — a multi-agent game studio.
+Made and iterated by [code-play studio](https://github.com/linnana8888888/code-play) — a multi-agent game studio. Shipped live on [itch.io/cheekshot](https://linnana8888888.itch.io/cheekshot).
 
-![Porcelain Lab — magnet upgrade](qa/v6_rec_02.png)
-![Sewer Depths — late game](qa/v6_rec_05.png)
+![Butt Shooting v8 title screen](qa/v8_title.png)
+
+## What's new in v8
+
+v8 is the "Session Time & Satisfaction" update — pushes average session from 1.5 min toward 5+ min.
+
+- **Continue screen** — on death, 10s "Continue?" countdown instead of instant game-over; respawn at 50% HP + 2s i-frames + −30% score. One continue per run.
+- **End-of-run stats card** — time survived, accuracy %, kill count, best combo multiplier, hi-score on both game-over and win screens.
+- **10 achievements** (`achievements.mjs`) — localStorage-persisted with toast notifications: First Blood, Sharpshooter, Combo Master, Survivor (3 min), Boss Slayer, Sewer Diver, Century (1000 pts), Void Walker, Mega Slayer, Second Wind.
+- **Tiered combo audio** — distinct escalating sounds per tier: x2 bell → x3 two-note chime → x4 triangle fanfare → x5 full chord burst + noise + sparkle.
+- **Wave progression** + expanded screen shake + local leaderboard.
+- **Kenney Nature Kit** per-level background scenery.
+- **3D backdrop** (`backdrop.mjs`) replaces v7 skydome shader.
+- Boss progression bug fix.
+
+Earlier versions: [V7_NOTES.md](V7_NOTES.md) (aesthetic levels — Toxic Swamp, Void Dimension), [V4_NOTES.md](V4_NOTES.md) (XP gems, level-up modal, stomp, modifier roulette), [V8_NOTES.md](V8_NOTES.md) (full v8 spec).
+
+![Continue screen](qa/v8_continue.png)
 
 ## Play
 
@@ -66,17 +82,21 @@ Win condition: defeat the Mega Clog King.
 ## Modules
 
 ```
-index.html            HUD shell, CSS, importmap
-game.mjs              Main loop, state, levels, enemies, projectiles
+index.html            HUD shell, CSS, importmap, overlays (title, picker, continue, gameover)
+game.mjs              Main loop, state, levels, enemies, projectiles, continue/stats card logic
 player.mjs            Butt model, movement, magazine/reload, input
 camera.mjs            Top-down / chase / FPS cycle, pointer lock, sensitivity
-audio.mjs             WebAudio SFX + procedural music (3 level tracks)
-scenes.mjs            Level configs, props, enemy builders
-juice.mjs             Floaters, combo, powerups, Clog King AI, bean rain
+audio.mjs             WebAudio SFX + procedural music + v8 tiered combo sounds
+scenes.mjs            Level configs, props, enemy builders, per-level shader registry
+backdrop.mjs          v8: 3D geometry backdrop per level (replaces v7 skydome)
+achievements.mjs      v8: 10 achievements, localStorage persistence, toast notifications
+juice.mjs             Floaters, combo, powerups, Clog King AI, bean rain, screen shake/flash/vignette
 upgrades.mjs          XP gems, level-up picker, modifier roulette, stats
 upgrade_offers.mjs    Early upgrade guarantee, diversity, pity timer
 spawn_scheduler.mjs   Warmup dummy phase for level 1
 beacon_renderer.mjs   Healthkit beacon visuals
+skydome.mjs           v7 legacy gradient skydome (kept for fallback; v8 uses backdrop.mjs)
+scenery.mjs           Kenney Nature Kit per-level background scenery (v8)
 analytics.mjs         Event log, localStorage rollup, dev panel
 ```
 
