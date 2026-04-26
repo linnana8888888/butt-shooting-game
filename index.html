@@ -772,7 +772,9 @@
       <div id="lobby-roomScreen" style="display:none">
         <h1>🍑🍑 CO-OP</h1>
         <h2>Find a butt buddy</h2>
-        <div class="lobby-btn-row">
+        <p style="font-size:12px;opacity:.6;margin-bottom:6px">Server address (host running <code>node server.mjs</code>):</p>
+        <input id="lobby-serverInput" class="lobby-code-input" style="width:220px;letter-spacing:0;font-size:14px;text-transform:none" placeholder="localhost:3000" autocomplete="off" spellcheck="false">
+        <div class="lobby-btn-row" style="margin-top:12px">
           <button id="lobby-createBtn" class="lobby-btn create">CREATE ROOM</button>
         </div>
         <hr class="lobby-divider">

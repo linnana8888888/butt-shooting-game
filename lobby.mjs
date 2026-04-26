@@ -12,8 +12,16 @@
 
 import { createNetwork } from './network.mjs';
 
-// Server URL — same host, port 3000
-const WS_URL = `ws://${location.hostname || 'localhost'}:3000`;
+// Server URL — use ?server=host:port query param, or same host on port 3000
+function getServerUrl() {
+  const params = new URLSearchParams(location.search);
+  const server = params.get('server');
+  if (server) return `ws://${server}`;
+  // If opened via file:// or hostname is empty, we need the user to specify
+  const host = location.hostname || 'localhost';
+  return `ws://${host}:3000`;
+}
+const WS_URL = getServerUrl();
 
 export function createLobby(callbacks) {
   const { onSinglePlayer, onMultiplayerStart } = callbacks;
@@ -85,31 +93,44 @@ export function createLobby(callbacks) {
       hide();
       onSinglePlayer();
     });
-    document.getElementById('lobby-coopBtn')?.addEventListener('click', async () => {
-      // Auto-create network connection when entering co-op
-      if (!network) {
-        try {
-          network = createNetwork(WS_URL);
-          await network.connect();
-          _updateConnStatus(true, null);
-          network.onDisconnect(() => _updateConnStatus(false, null));
-        } catch (e) {
-          _showRoomError('Cannot connect to server. Is it running? (node server.mjs)');
-          network = null;
-          return;
-        }
-      }
+    document.getElementById('lobby-coopBtn')?.addEventListener('click', () => {
       showScreen('roomScreen');
+      // Pre-fill server input with default
+      const serverInput = document.getElementById('lobby-serverInput');
+      if (serverInput && !serverInput.value) {
+        serverInput.value = (location.hostname || 'localhost') + ':3000';
+      }
     });
+  }
+
+  // ── Ensure connected ──────────────────────────────────────────────────────
+  async function _ensureConnected() {
+    const serverInput = document.getElementById('lobby-serverInput');
+    const addr = (serverInput?.value || '').trim() || (location.hostname || 'localhost') + ':3000';
+    const url = `ws://${addr}`;
+
+    if (network && network.isConnected()) return true;
+
+    if (network) { try { network.disconnect(); } catch (_) {} }
+    network = null;
+
+    try {
+      network = createNetwork(url);
+      await network.connect();
+      _updateConnStatus(true, null);
+      network.onDisconnect(() => _updateConnStatus(false, null));
+      return true;
+    } catch (e) {
+      _showRoomError(`Cannot connect to ${url}. Is the server running?`);
+      network = null;
+      return false;
+    }
   }
 
   // ── Room Screen ────────────────────────────────────────────────────────────
   function _bindRoomScreen() {
     document.getElementById('lobby-createBtn')?.addEventListener('click', async () => {
-      if (!network) {
-        _showRoomError('No network connection. Start a server first.');
-        return;
-      }
+      if (!(await _ensureConnected())) return;
       try {
         const result = await network.createRoom();
         roomCode = result.code;
@@ -127,10 +148,7 @@ export function createLobby(callbacks) {
         _showRoomError('Enter a 4-letter Butt Link code.');
         return;
       }
-      if (!network) {
-        _showRoomError('No network connection. Start a server first.');
-        return;
-      }
+      if (!(await _ensureConnected())) return;
       try {
         const result = await network.joinRoom(code);
         roomCode = result.code;
