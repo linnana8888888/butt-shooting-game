@@ -442,7 +442,13 @@ export function createRemotePlayer(THREE, ctx) {
   // Set initial name
   setName(displayName);
 
-  return { update, setName, destroy, mesh };
+  function setVisible(v) {
+    if (destroyed) return;
+    mesh.visible = v;
+    nametag.el.style.display = v ? '' : 'none';
+  }
+
+  return { update, setName, setVisible, destroy, mesh };
 }
 
 // ── Remote butt mesh (blue-tinted) ───────────────────────────────────────────

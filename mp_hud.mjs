@@ -158,24 +158,24 @@ export function createMpHud(container) {
   disconnectWarn.id = 'mp-disconnectWarn';
   disconnectWarn.style.cssText = `
     position: absolute;
-    left: 50%; top: 50%;
-    transform: translate(-50%, -50%);
+    left: 50%; top: 16px;
+    transform: translateX(-50%);
     ${panelStyle(`
-      padding: 18px 32px;
+      padding: 8px 20px;
       text-align: center;
       border-color: ${COLORS.red};
-      box-shadow: 0 0 0 3px ${COLORS.red}, 0 6px 0 ${COLORS.ink};
+      box-shadow: 0 0 0 2px ${COLORS.red}, 0 3px 0 ${COLORS.ink};
     `)}
-    font-size: 20px;
+    font-size: 14px;
     display: none;
     pointer-events: none;
+    opacity: 0.9;
   `;
   disconnectWarn.innerHTML = `
-    <div style="font-size:36px;margin-bottom:6px">💔</div>
-    <div style="color:${COLORS.red};font-size:22px;font-family:'Fredoka One',Fredoka,sans-serif">
-      Partner Disconnected!
-    </div>
-    <div style="font-size:14px;opacity:.8;margin-top:6px">Waiting for reconnect…</div>
+    <span style="font-size:16px;margin-right:6px">💔</span>
+    <span style="color:${COLORS.red};font-size:14px;font-family:'Fredoka One',Fredoka,sans-serif">
+      Partner disconnected — solo mode
+    </span>
   `;
   root.appendChild(disconnectWarn);
 

@@ -2157,9 +2157,16 @@ function applyMpState(state) {
 
   // Update local player position from server
   if (myState) {
-    game.playerObj.position.set(myState.x, 0, myState.z);
-    p.x = myState.x;
-    p.z = myState.z;
+    if (myState.dead) {
+      // Dead: hide mesh, show respawn countdown
+      if (game.playerObj) game.playerObj.visible = false;
+    } else {
+      // Alive: sync position
+      if (game.playerObj) game.playerObj.visible = true;
+      game.playerObj.position.set(myState.x, 0, myState.z);
+      p.x = myState.x;
+      p.z = myState.z;
+    }
     p.hp = myState.hp;
     p.maxHp = myState.maxHp;
     if (p.mag) {
@@ -2173,9 +2180,14 @@ function applyMpState(state) {
 
   // Update remote player
   if (remoteState && game.mpRemotePlayer) {
-    game.mpRemotePlayer.update(remoteState);
+    if (remoteState.dead) {
+      game.mpRemotePlayer.setVisible(false);
+    } else {
+      game.mpRemotePlayer.setVisible(true);
+      game.mpRemotePlayer.update(remoteState);
+    }
     if (game.mpHud) {
-      game.mpHud.updatePartnerHp(remoteState.hp / (remoteState.maxHp || 100));
+      game.mpHud.updatePartnerHp(remoteState.dead ? 0 : remoteState.hp / (remoteState.maxHp || 100));
       game.mpHud.updateScore(state.score || 0);
     }
   }
@@ -2348,17 +2360,40 @@ function handleMpEvent(msg) {
     showBanner(`LEVEL ${data.level}`);
   } else if (kind === 'death') {
     if (data.playerId === myId) {
-      game.state = 'gameover';
-      sfx.stopMusic?.();
-      sfx.death?.();
-      hud.goScore.textContent = game.score;
-      hud.goLevel.textContent = `Wave ${game.wave} (Co-op)`;
-      hud.goOverlay.classList.remove('hide');
+      if (data.lives > 0) {
+        // Temporary death — will respawn
+        sfx.death?.();
+        shakeCamera(camera, 0.3, 600);
+        showBanner(`YOU DIED! Respawning... (${data.lives} ❤️ left)`);
+        // Fade player mesh
+        if (game.playerObj) game.playerObj.visible = false;
+      } else {
+        // Final death — no more lives
+        game.state = 'gameover';
+        sfx.stopMusic?.();
+        sfx.death?.();
+        hud.goScore.textContent = game.score;
+        hud.goLevel.textContent = `Wave ${game.wave} (Co-op)`;
+        hud.goOverlay.classList.remove('hide');
+      }
     } else {
-      if (game.mpHud) game.mpHud.showWaveBanner('💔 Partner Down!');
+      if (data.lives > 0) {
+        if (game.mpHud) game.mpHud.showWaveBanner(`💔 Partner down! (${data.lives} ❤️ left)`);
+      } else {
+        if (game.mpHud) game.mpHud.showWaveBanner('💔 Partner eliminated!');
+      }
       if (game.floaters && game.player) {
         game.floaters.spawn(new THREE.Vector3(game.player.x, 3, game.player.z), 'PARTNER DOWN!', '#FF4040', true);
       }
+    }
+  } else if (kind === 'respawn') {
+    if (data.playerId === myId) {
+      // We respawned!
+      if (game.playerObj) game.playerObj.visible = true;
+      showBanner(`RESPAWNED! (${data.lives} ❤️ left)`);
+      shakeCamera(camera, 0.1, 200);
+    } else {
+      if (game.mpHud) game.mpHud.showWaveBanner('🍑 Partner is back!');
     }
   } else if (kind === 'gameover') {
     if (game.state !== 'play') return;

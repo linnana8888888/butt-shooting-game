@@ -221,6 +221,8 @@ class Room {
         reloadTimer: 0,
         iFrameTimer: 0,
         dead: false,
+        respawnTimer: 0,   // seconds until respawn (0 = alive)
+        lives: 3,          // lives remaining
         // latest input snapshot
         keys: { w: false, a: false, s: false, d: false },
         shoot: false,
@@ -260,6 +262,25 @@ class Room {
 
     const alivePlayers = Object.values(this.players).filter(p => !p.dead);
     const playerCount  = Object.keys(this.sockets).length;
+
+    // 0. Respawn timers
+    for (const p of Object.values(this.players)) {
+      if (p.dead && p.respawnTimer > 0) {
+        p.respawnTimer -= dt;
+        if (p.respawnTimer <= 0) {
+          p.respawnTimer = 0;
+          p.dead = false;
+          p.hp = p.maxHp;
+          p.mag = MAG_SIZE;
+          p.reloading = false;
+          p.reloadTimer = 0;
+          p.iFrameTimer = 2.0; // 2s invincibility on respawn
+          // Spawn at center
+          p.x = 0; p.z = 0;
+          this._broadcast({ type: 'event', kind: 'respawn', data: { playerId: p.id, lives: p.lives } });
+        }
+      }
+    }
 
     // 1. Move players
     for (const p of Object.values(this.players)) {
@@ -385,8 +406,15 @@ class Room {
             if (nearest.hp <= 0) {
               nearest.hp   = 0;
               nearest.dead = true;
-              this._broadcast({ type: 'event', kind: 'death', data: { playerId: nearest.id } });
-              this._checkGameOver();
+              nearest.lives--;
+              if (nearest.lives > 0) {
+                nearest.respawnTimer = 3.0; // respawn after 3 seconds
+                this._broadcast({ type: 'event', kind: 'death', data: { playerId: nearest.id, lives: nearest.lives, respawnIn: 3.0 } });
+              } else {
+                nearest.respawnTimer = 0; // no more respawns
+                this._broadcast({ type: 'event', kind: 'death', data: { playerId: nearest.id, lives: 0, final: true } });
+                this._checkGameOver();
+              }
             }
           }
         }
@@ -510,16 +538,19 @@ class Room {
       type:        'state',
       tick:        this.tick,
       players:     Object.values(this.players).map(p => ({
-        id:        p.id,
-        x:         p.x,
-        z:         p.z,
-        hp:        p.hp,
-        maxHp:     p.maxHp,
-        aimX:      p.aimX,
-        aimZ:      p.aimZ,
-        score:     p.score,
-        mag:       p.mag,
-        reloading: p.reloading,
+        id:           p.id,
+        x:            p.x,
+        z:            p.z,
+        hp:           p.hp,
+        maxHp:        p.maxHp,
+        aimX:         p.aimX,
+        aimZ:         p.aimZ,
+        score:        p.score,
+        mag:          p.mag,
+        reloading:    p.reloading,
+        dead:         p.dead,
+        respawnTimer: p.respawnTimer,
+        lives:        p.lives,
       })),
       enemies:     Object.values(this.enemies).map(e => ({
         id:   e.id,
