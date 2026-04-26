@@ -772,19 +772,33 @@
       <div id="lobby-roomScreen" style="display:none">
         <h1>🍑🍑 CO-OP</h1>
         <h2>Find a butt buddy</h2>
-        <p style="font-size:12px;opacity:.6;margin-bottom:6px">Server address (host running <code>node server.mjs</code>):</p>
-        <input id="lobby-serverInput" class="lobby-code-input" style="width:220px;letter-spacing:0;font-size:14px;text-transform:none" placeholder="localhost:3000" autocomplete="off" spellcheck="false">
-        <div class="lobby-btn-row" style="margin-top:12px">
-          <button id="lobby-createBtn" class="lobby-btn create">CREATE ROOM</button>
+
+        <!-- HOST section -->
+        <div style="background:rgba(95,217,255,0.12);border-radius:12px;padding:14px 16px;margin-bottom:14px">
+          <p style="font-size:15px;font-weight:bold;margin:0 0 6px">🏠 I'm hosting</p>
+          <p style="font-size:12px;opacity:.7;margin:0 0 10px">Start a room. Your friend joins with the code.</p>
+          <button id="lobby-createBtn" class="lobby-btn create" style="width:100%">CREATE ROOM</button>
         </div>
-        <hr class="lobby-divider">
-        <p style="font-size:13px;opacity:.7;margin-bottom:8px">— or enter a Butt Link code —</p>
-        <div style="display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap">
-          <input id="lobby-codeInput" class="lobby-code-input" maxlength="4" placeholder="ABCD" autocomplete="off" spellcheck="false">
-          <button id="lobby-joinBtn" class="lobby-btn join">JOIN</button>
+
+        <p style="font-size:13px;opacity:.5;margin:8px 0">— or —</p>
+
+        <!-- JOIN section -->
+        <div style="background:rgba(255,210,77,0.12);border-radius:12px;padding:14px 16px">
+          <p style="font-size:15px;font-weight:bold;margin:0 0 6px">🤝 I'm joining</p>
+          <p style="font-size:12px;opacity:.7;margin:0 0 8px">Enter your friend's IP and room code.</p>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+            <label style="font-size:11px;opacity:.6;white-space:nowrap">🌐 Friend's IP:</label>
+            <input id="lobby-serverInput" class="lobby-code-input" style="width:170px;letter-spacing:0;font-size:14px;text-transform:none;flex:1" placeholder="192.168.x.x:3000" autocomplete="off" spellcheck="false">
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <label style="font-size:11px;opacity:.6;white-space:nowrap">🔑 Room code:</label>
+            <input id="lobby-codeInput" class="lobby-code-input" maxlength="4" placeholder="ABCD" autocomplete="off" spellcheck="false" style="flex:1">
+            <button id="lobby-joinBtn" class="lobby-btn join">JOIN</button>
+          </div>
         </div>
+
         <div id="lobby-roomError" class="lobby-error"></div>
-        <div class="lobby-btn-row">
+        <div class="lobby-btn-row" style="margin-top:12px">
           <button id="lobby-roomBackBtn" class="lobby-btn back">← Back</button>
         </div>
         <div class="lobby-conn-bar">
@@ -798,7 +812,8 @@
         <h1>🍑🍑 LOBBY</h1>
         <h2>Butt Link</h2>
         <div class="lobby-code-display" id="lobby-roomCode">????</div>
-        <p style="font-size:12px;opacity:.6;margin-top:0">Share this code with your butt buddy</p>
+        <p style="font-size:13px;opacity:.7;margin-top:0">Tell your friend:</p>
+        <p style="font-size:12px;margin:4px 0 12px;opacity:.85">🌐 Enter IP: <b id="lobby-hostIp">...</b> &nbsp;•&nbsp; 🔑 Code: <b id="lobby-hostCode">????</b></p>
         <div class="lobby-player-list">
           <div class="lobby-player-row">
             <span class="pname">🍑 Player 1</span>
@@ -826,7 +841,7 @@
 
   <div id="title" class="overlay hide">
     <div class="card">
-      <h1>BUTT SHOOTING · v8</h1>
+      <h1>BUTT SHOOTING · v9</h1>
       <p>Three levels. Unlimited beans. Boss fight.</p>
       <p class="controls-desktop">WASD move · Space fire · R reload · Shift dash · Q stomp · V camera · M mute</p>
       <p class="controls-touch" style="display:none">Joystick moves · FIRE to shoot · 🔄 reload · 🥾 stomp</p>

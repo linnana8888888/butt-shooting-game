@@ -186,6 +186,35 @@ export function createLobby(callbacks) {
     _updateWaitingUI();
     showScreen('waitingScreen');
 
+    // Show connection info for the host to share
+    const hostIpEl = document.getElementById('lobby-hostIp');
+    const hostCodeEl = document.getElementById('lobby-hostCode');
+    if (hostCodeEl) hostCodeEl.textContent = roomCode || '????';
+    if (hostIpEl) {
+      const serverInput = document.getElementById('lobby-serverInput');
+      const addr = (serverInput?.value || '').trim();
+      // If host used localhost, try to show a helpful hint
+      if (!addr || addr.startsWith('localhost') || addr.startsWith('127.')) {
+        hostIpEl.textContent = '(your IP):3000';
+        // Try WebRTC trick to get local IP
+        try {
+          const pc = new RTCPeerConnection({iceServers:[]});
+          pc.createDataChannel('');
+          pc.createOffer().then(o => pc.setLocalDescription(o));
+          pc.onicecandidate = (e) => {
+            if (!e.candidate) return;
+            const m = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/);
+            if (m && m[1] !== '0.0.0.0' && !m[1].startsWith('127.')) {
+              hostIpEl.textContent = m[1] + ':3000';
+              pc.close();
+            }
+          };
+        } catch (_) {}
+      } else {
+        hostIpEl.textContent = addr;
+      }
+    }
+
     // Listen for server messages (peer join, start)
     if (network) {
       network.onMessage((msg) => {
