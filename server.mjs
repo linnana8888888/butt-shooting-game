@@ -601,6 +601,12 @@ wss.on('connection', (ws) => {
 
     const meta = clientMeta.get(ws);
 
+    // ── ping (echo back for latency measurement) ──────────────────────────────────
+    if (msg.type === 'ping') {
+      send(ws, { type: 'pong', seq: msg.seq });
+      return;
+    }
+
     // ── create ──────────────────────────────────────────────────────────────
     if (msg.type === 'create') {
       if (meta) { send(ws, { type: 'error', message: 'Already in a room' }); return; }

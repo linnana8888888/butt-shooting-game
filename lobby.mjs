@@ -10,6 +10,11 @@
  *   lobby.show();
  */
 
+import { createNetwork } from './network.mjs';
+
+// Server URL — same host, port 3000
+const WS_URL = `ws://${location.hostname || 'localhost'}:3000`;
+
 export function createLobby(callbacks) {
   const { onSinglePlayer, onMultiplayerStart } = callbacks;
 
@@ -80,7 +85,20 @@ export function createLobby(callbacks) {
       hide();
       onSinglePlayer();
     });
-    document.getElementById('lobby-coopBtn')?.addEventListener('click', () => {
+    document.getElementById('lobby-coopBtn')?.addEventListener('click', async () => {
+      // Auto-create network connection when entering co-op
+      if (!network) {
+        try {
+          network = createNetwork(WS_URL);
+          await network.connect();
+          _updateConnStatus(true, null);
+          network.onDisconnect(() => _updateConnStatus(false, null));
+        } catch (e) {
+          _showRoomError('Cannot connect to server. Is it running? (node server.mjs)');
+          network = null;
+          return;
+        }
+      }
       showScreen('roomScreen');
     });
   }
@@ -94,8 +112,8 @@ export function createLobby(callbacks) {
       }
       try {
         const result = await network.createRoom();
-        roomCode = result.roomCode;
-        playerId = result.playerId || 'P1';
+        roomCode = result.code;
+        playerId = result.playerId || 1;
         _enterWaiting();
       } catch (e) {
         _showRoomError('Could not create room: ' + e.message);
@@ -115,8 +133,8 @@ export function createLobby(callbacks) {
       }
       try {
         const result = await network.joinRoom(code);
-        roomCode = result.roomCode;
-        playerId = result.playerId || 'P2';
+        roomCode = result.code;
+        playerId = result.playerId || 2;
         _enterWaiting();
       } catch (e) {
         _showRoomError('Could not join room: ' + e.message);
@@ -150,31 +168,22 @@ export function createLobby(callbacks) {
     _updateWaitingUI();
     showScreen('waitingScreen');
 
-    // Poll for partner state if network supports it
-    if (network && typeof network.onRoomUpdate === 'function') {
-      network.onRoomUpdate(_handleRoomUpdate);
+    // Listen for server messages (peer join, start)
+    if (network) {
+      network.onMessage((msg) => {
+        if (msg.type === 'room' && msg.playerId !== playerId) {
+          // Partner joined
+          partnerReady = false;
+          _updateWaitingUI();
+        }
+        if (msg.type === 'start') {
+          // Server says both ready, game starting
+          _stopConnectionMonitor();
+          hide();
+          onMultiplayerStart(network, playerId, roomCode);
+        }
+      });
     }
-    if (network && typeof network.pollRoom === 'function') {
-      pollInterval = setInterval(async () => {
-        try {
-          const state = await network.pollRoom(roomCode);
-          _handleRoomUpdate(state);
-        } catch (_) {}
-      }, 1500);
-    }
-  }
-
-  function _handleRoomUpdate(state) {
-    if (!state) return;
-    // state: { players: [{id, ready}, ...], ping: number }
-    if (typeof state.ping === 'number') _updateConnStatus(true, state.ping);
-    const players = state.players || [];
-    const me = players.find(p => p.id === playerId);
-    const partner = players.find(p => p.id !== playerId);
-    if (me)      myReady      = me.ready;
-    if (partner) partnerReady = partner.ready;
-    _updateWaitingUI();
-    _checkBothReady();
   }
 
   function _updateWaitingUI() {
@@ -184,7 +193,7 @@ export function createLobby(callbacks) {
     const p1El = document.getElementById('lobby-player1status');
     const p2El = document.getElementById('lobby-player2status');
 
-    if (playerId === 'P1' || playerId?.startsWith('P1')) {
+    if (playerId === 1) {
       if (p1El) p1El.textContent = myReady ? '✓ Ready' : '…';
       if (p2El) p2El.textContent = partnerReady ? '✓ Ready' : 'Waiting...';
     } else {
@@ -200,11 +209,8 @@ export function createLobby(callbacks) {
   }
 
   function _checkBothReady() {
-    if (myReady && partnerReady) {
-      _stopConnectionMonitor();
-      hide();
-      onMultiplayerStart(network, playerId, roomCode);
-    }
+    // Server handles the actual start — we just update UI locally
+    _updateWaitingUI();
   }
 
   function _bindWaitingScreen() {
@@ -212,7 +218,7 @@ export function createLobby(callbacks) {
       myReady = !myReady;
       _updateWaitingUI();
       if (network && typeof network.setReady === 'function') {
-        try { await network.setReady(roomCode, playerId, myReady); } catch (_) {}
+        try { network.setReady(); } catch (_) {}
       }
       _checkBothReady();
     });

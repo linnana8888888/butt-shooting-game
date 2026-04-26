@@ -32,6 +32,9 @@ export function createNetwork(url) {
 
   // ── Internal helpers ──────────────────────────────────────────────────────
 
+  // Disconnect callbacks
+  const disconnectHandlers = [];
+
   function _onOpen() {
     connected = true;
     console.log('[network] connected to', url);
@@ -49,6 +52,10 @@ export function createNetwork(url) {
       reject(new Error('WebSocket closed'));
     }
     pendingPings.clear();
+    // Notify disconnect handlers
+    for (const cb of disconnectHandlers) {
+      try { cb(e); } catch (err) { console.error('[network] disconnect handler error', err); }
+    }
   }
 
   function _onError(e) {
@@ -91,12 +98,14 @@ export function createNetwork(url) {
   // ── Public API ────────────────────────────────────────────────────────────
 
   function connect() {
-    if (ws) return;
-    ws = new WebSocket(url);
-    ws.addEventListener('open', _onOpen);
-    ws.addEventListener('close', _onClose);
-    ws.addEventListener('error', _onError);
-    ws.addEventListener('message', _onMessage);
+    return new Promise((resolve, reject) => {
+      if (ws) { resolve(); return; }
+      ws = new WebSocket(url);
+      ws.addEventListener('open', () => { _onOpen(); resolve(); });
+      ws.addEventListener('close', _onClose);
+      ws.addEventListener('error', (e) => { _onError(e); reject(new Error('WebSocket connection failed')); });
+      ws.addEventListener('message', _onMessage);
+    });
   }
 
   function disconnect() {
@@ -201,11 +210,17 @@ export function createNetwork(url) {
     });
   }
 
+  /** Register a disconnect handler. */
+  function onDisconnect(callback) {
+    disconnectHandlers.push(callback);
+  }
+
   return {
     connect,
     disconnect,
     isConnected,
     onMessage,
+    onDisconnect,
     send,
     createRoom,
     joinRoom,
