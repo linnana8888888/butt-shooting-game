@@ -1,0 +1,27 @@
+{
+  "name": "butt-shooting-game",
+  "version": "1.0.0",
+  "description": "Arcade-style 3D shooter built with Three.js. Three themed levels, a boss fight, survivor.io-style upgrade loop, combo system, mobile touch controls, and analytics — all in vanilla ES modules, no bundler.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/linnana8888888/butt-shooting-game.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/linnana8888888/butt-shooting-game/issues"
+  },
+  "homepage": "https://github.com/linnana8888888/butt-shooting-game#readme",
+  "dependencies": {
+    "ws": "^8.20.0"
+  }
+}
