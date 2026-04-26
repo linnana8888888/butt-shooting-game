@@ -2,6 +2,8 @@
 
 import * as THREE from 'three';
 import { sfx } from './audio.mjs';
+import { createInterpolator, createRemotePlayer, INTERP_DELAY_MS, INPUT_HZ } from './network.mjs';
+import { createMpHud } from './mp_hud.mjs';
 import {
   LEVELS, applyLevel, clearPropRoot,
   buildToiletGolem, buildSewerRat,
@@ -399,6 +401,19 @@ export const game = {
   healthKits: [],
   healthKitSpawnCd: 22,
   healthKitPityArmed: false,
+  // ── multiplayer state ──────────────────────────────────────────────────────
+  mpMode: false,        // true when in co-op
+  mpNetwork: null,      // network object from network.mjs
+  mpPlayerId: null,     // 1 or 2
+  mpRemotePlayer: null, // remote player Three.js object (createRemotePlayer result)
+  mpInterpolator: null, // state interpolator
+  mpHud: null,          // multiplayer HUD
+  mpRoomCode: null,
+  mpEnemyMeshes: null,  // Map<enemyId, {obj, kind}>
+  mpProjectileMeshes: null, // Map<projId, obj>
+  mpPickupMeshes: null,     // Map<pickupId, {obj, kind}>
+  mpInputInterval: null,    // setInterval handle for input sending
+  mpPeerDisconnected: false,
 };
 
 // ─── HUD refs ─────────────────────────────────────────────────────────────────
@@ -1205,6 +1220,77 @@ function updateGame(dt, now) {
     return;
   }
 
+  // ── Multiplayer mode: server is authoritative; client just renders ──────────
+  if (game.mpMode) {
+    // Apply latest interpolated server state
+    if (game.mpInterpolator) {
+      const renderTime = performance.now() - INTERP_DELAY_MS;
+      const state = game.mpInterpolator.getInterpolated(renderTime);
+      if (state) applyMpState(state);
+    }
+
+    // Camera still tracks local player
+    updateMouseWorld();
+    game.cam.update(p, mouse.world);
+
+    // Aim still follows mouse/touch for visual feedback
+    if (isTouchDevice && touch.active && (touch.vx !== 0 || touch.vz !== 0)) {
+      const m = Math.hypot(touch.vx, touch.vz) || 1;
+      p.aimX = touch.vx / m;
+      p.aimZ = touch.vz / m;
+    }
+    p.rot = Math.atan2(-p.aimX, -p.aimZ);
+    p.obj.rotation.y = p.rot;
+
+    // Update remote player nametag
+    if (game.mpRemotePlayer && game.mpHud) {
+      game.mpHud.updatePartnerNametag(camera, game.mpRemotePlayer.mesh, `Player ${game.mpPlayerId === 1 ? 2 : 1}`);
+    }
+
+    // Update ping display
+    if (game.mpHud && game.mpNetwork) {
+      game.mpHud.updatePing(game.mpNetwork.latency != null ? Math.round(game.mpNetwork.latency) : null);
+    }
+
+    // Poofs and particles still animate locally
+    for (let i = game.poofs.length - 1; i >= 0; i--) {
+      const d = game.poofs[i];
+      d.life -= dt;
+      d.obj.position.x += d.vx * dt;
+      d.obj.position.y += d.vy * dt;
+      d.obj.position.z += d.vz * dt;
+      d.vy -= 6 * dt;
+      d.obj.material.opacity = Math.max(d.life / 0.6, 0);
+      d.obj.material.transparent = true;
+      if (d.life <= 0) {
+        scene.remove(d.obj);
+        d.obj.geometry.dispose();
+        d.obj.material.dispose();
+        game.poofs.splice(i, 1);
+      }
+    }
+    for (let i = game.particles.length - 1; i >= 0; i--) {
+      const pt = game.particles[i];
+      pt.life -= dt;
+      pt.obj.position.x += pt.vx * dt;
+      pt.obj.position.y += pt.vy * dt;
+      pt.obj.position.z += pt.vz * dt;
+      const frac = pt.life / pt.maxLife;
+      pt.obj.scale.setScalar(Math.max(0.01, frac));
+      pt.obj.material.opacity = Math.max(0, frac * 0.9);
+      if (pt.life <= 0) {
+        scene.remove(pt.obj);
+        pt.obj.geometry.dispose();
+        pt.obj.material.dispose();
+        game.particles.splice(i, 1);
+      }
+    }
+
+    renderHud();
+    return;
+  }
+  // ── End multiplayer branch ──────────────────────────────────────────────────
+
   // — v7: record player position history for shadowClone
   _playerPosHistory.push({ x: p.x, z: p.z, t: now });
   // prune old entries
@@ -1928,6 +2014,405 @@ function initContinueButtons() {
   });
 }
 
+// ─── multiplayer integration ─────────────────────────────────────────────────
+
+// Listen for the lobby dispatching a multiplayer start event.
+document.addEventListener('lobby:multiplayerStart', (e) => {
+  const { network, playerId, roomCode } = e.detail;
+  game.mpMode = true;
+  game.mpNetwork = network;
+  game.mpPlayerId = playerId;
+  game.mpRoomCode = roomCode;
+  startMultiplayerGame();
+});
+
+function startMultiplayerGame() {
+  sfx.init();
+  resetScene();
+  resetGems();
+  // reset healthkit state
+  game.healthKits.length = 0;
+  game.healthKitSpawnCd = 22;
+  game.healthKitPityArmed = false;
+  if (game.beacon) game.beacon.clear();
+
+  // Hide all overlays
+  hud.titleOverlay.classList.add('hide');
+  hud.goOverlay.classList.add('hide');
+  hud.winOverlay.classList.add('hide');
+  if (hud.continueOverlay) hud.continueOverlay.classList.add('hide');
+  if (hud.leaderboardOverlay) hud.leaderboardOverlay.classList.add('hide');
+  hud.bossbar.classList.remove('show');
+  game.picker.hide();
+  if (game.scenery) game.scenery.clear();
+
+  // Reset per-run state
+  game.continueUsed = false;
+  if (game.continueTimer) { clearInterval(game.continueTimer); game.continueTimer = null; }
+  game.bestCombo = 1;
+  game.maxLevel = 0;
+  game.megaBossKilled = false;
+  game.mpPeerDisconnected = false;
+
+  // Player setup
+  if (!game.playerObj) {
+    game.playerObj = buildButt(ctx);
+    scene.add(game.playerObj);
+  }
+  game.player = makePlayer(game.playerObj);
+  game.playerObj.position.set(0, 0, 0);
+
+  game.powerups = createPowerups(game.player, hud.buffs);
+  game.stats = createStats();
+  game.xp = createXp({ onLevelUp: onXpLevelUp });
+  game.stompCd = 0;
+
+  game.score = 0;
+  game.levelIdx = 0;
+  game.killsInLevel = 0;
+  game.wave = 1;
+  game.waveKills = 0;
+  game.waveKillTarget = 10;
+  game.enemyCap = 12;
+  if (hud.waveNum) hud.waveNum.textContent = '1';
+  game.waveTimer = 3.2;
+  game.dashCooldown = 0;
+  game.combo.reset();
+  game.rain.timer = 30;
+
+  // Set up MP mesh maps
+  game.mpEnemyMeshes = new Map();
+  game.mpProjectileMeshes = new Map();
+  game.mpPickupMeshes = new Map();
+
+  // Create interpolator
+  game.mpInterpolator = createInterpolator();
+
+  // Create remote player mesh (blue-tinted butt)
+  const mpCtx = { ...ctx, camera, renderer };
+  game.mpRemotePlayer = createRemotePlayer(THREE, mpCtx);
+  game.mpRemotePlayer.setName(`Player ${game.mpPlayerId === 1 ? 2 : 1}`);
+
+  // Create MP HUD
+  if (game.mpHud) game.mpHud.destroy();
+  game.mpHud = createMpHud(document.body);
+
+  // Register network message handler
+  game.mpNetwork.onMessage((msg) => {
+    if (msg.type === 'state') {
+      game.mpInterpolator.pushState(msg);
+    } else if (msg.type === 'event') {
+      handleMpEvent(msg);
+    } else if (msg.type === 'peer_disconnect') {
+      handleMpPeerDisconnect();
+    }
+  });
+
+  // Start input sending loop at INPUT_HZ (30 Hz)
+  if (game.mpInputInterval) clearInterval(game.mpInputInterval);
+  game.mpInputInterval = setInterval(() => {
+    if (game.state !== 'play' || !game.mpNetwork || !game.mpNetwork.isConnected()) return;
+    const p = game.player;
+    if (!p) return;
+    game.mpNetwork.send({
+      type: 'input',
+      keys: {
+        w: !!keys['KeyW'],
+        a: !!keys['KeyA'],
+        s: !!keys['KeyS'],
+        d: !!keys['KeyD'],
+      },
+      aimX: p.aimX || 0,
+      aimZ: p.aimZ || -1,
+      shoot: firing || false,
+      reload: !!keys['KeyR'],
+    });
+  }, 1000 / INPUT_HZ);
+
+  // Enter the level visuals (environment, music)
+  enterLevel(0);
+  showBanner('CO-OP MODE');
+
+  game.state = 'play';
+  game.analytics.emit('mp:start', { playerId: game.mpPlayerId, roomCode: game.mpRoomCode });
+}
+
+// Apply a server state snapshot to the local scene (MP mode).
+function applyMpState(state) {
+  if (!state) return;
+  const p = game.player;
+  if (!p) return;
+
+  const myId = game.mpPlayerId;
+  const players = state.players || [];
+  const myState = players.find(ps => ps.id === myId);
+  const remoteState = players.find(ps => ps.id !== myId);
+
+  // Update local player position from server
+  if (myState) {
+    game.playerObj.position.set(myState.x, 0, myState.z);
+    p.x = myState.x;
+    p.z = myState.z;
+    p.hp = myState.hp;
+    p.maxHp = myState.maxHp;
+    if (p.mag) {
+      p.mag.cur = myState.mag ?? p.mag.cur;
+      p.mag.reloading = myState.reloading ?? p.mag.reloading;
+    }
+    game.score = state.score ?? game.score;
+    game.wave = state.wave ?? game.wave;
+    if (hud.waveNum) hud.waveNum.textContent = game.wave;
+  }
+
+  // Update remote player
+  if (remoteState && game.mpRemotePlayer) {
+    game.mpRemotePlayer.update(remoteState);
+    if (game.mpHud) {
+      game.mpHud.updatePartnerHp(remoteState.hp / (remoteState.maxHp || 100));
+      game.mpHud.updateScore(state.score || 0);
+    }
+  }
+
+  _syncMpEnemies(state.enemies || []);
+  _syncMpProjectiles(state.projectiles || []);
+  _syncMpPickups(state.pickups || []);
+}
+
+function _syncMpEnemies(serverEnemies) {
+  const meshMap = game.mpEnemyMeshes;
+  if (!meshMap) return;
+  const serverIds = new Set(serverEnemies.map(e => e.id));
+
+  for (const [id, rec] of meshMap) {
+    if (!serverIds.has(id)) {
+      scene.remove(rec.obj);
+      rec.obj.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+      if (rec.shadowDisc) {
+        scene.remove(rec.shadowDisc);
+        rec.shadowDisc.geometry.dispose();
+        rec.shadowDisc.material.dispose();
+      }
+      meshMap.delete(id);
+    }
+  }
+
+  for (const se of serverEnemies) {
+    if (!meshMap.has(se.id)) {
+      const obj = buildEnemyByKind(se.kind || 'flusher');
+      obj.position.set(se.x, 0, se.z);
+      obj.userData.glowPhase = Math.random() * Math.PI * 2;
+      scene.add(obj);
+      const sdGeo = new THREE.CircleGeometry(0.6, 16);
+      sdGeo.rotateX(-Math.PI / 2);
+      const sdMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3 });
+      const sd = new THREE.Mesh(sdGeo, sdMat);
+      sd.position.set(se.x, 0.05, se.z);
+      scene.add(sd);
+      meshMap.set(se.id, { obj, kind: se.kind, shadowDisc: sd });
+    } else {
+      const rec = meshMap.get(se.id);
+      rec.obj.position.set(se.x, 0, se.z);
+      if (rec.shadowDisc) rec.shadowDisc.position.set(se.x, 0.05, se.z);
+      const p = game.player;
+      if (p) rec.obj.rotation.y = Math.atan2(p.x - se.x, p.z - se.z);
+      const now = performance.now() / 1000;
+      rec.obj.traverse(child => {
+        if (child.isMesh && child.material && child.material.emissive) {
+          child.material.emissiveIntensity = 0.15 + 0.1 * Math.sin(now * 3 + (rec.obj.userData.glowPhase || 0));
+        }
+      });
+    }
+  }
+}
+
+function _syncMpProjectiles(serverProjectiles) {
+  const meshMap = game.mpProjectileMeshes;
+  if (!meshMap) return;
+  const serverIds = new Set(serverProjectiles.map(b => b.id));
+
+  for (const [id, obj] of meshMap) {
+    if (!serverIds.has(id)) {
+      scene.remove(obj);
+      obj.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+      meshMap.delete(id);
+    }
+  }
+
+  for (const sb of serverProjectiles) {
+    if (!meshMap.has(sb.id)) {
+      const projGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.5, 8);
+      projGeo.rotateX(Math.PI / 2);
+      const projMat = toon(C.beanGold);
+      const bean = new THREE.Mesh(projGeo, projMat);
+      bean.position.set(sb.x, 0.8, sb.z);
+      if (sb.vx != null && sb.vz != null) bean.rotation.y = Math.atan2(sb.vx, sb.vz);
+      scene.add(bean);
+      meshMap.set(sb.id, bean);
+    } else {
+      const obj = meshMap.get(sb.id);
+      obj.position.set(sb.x, 0.8, sb.z);
+      obj.rotation.y += 0.1;
+    }
+  }
+}
+
+function _syncMpPickups(serverPickups) {
+  const meshMap = game.mpPickupMeshes;
+  if (!meshMap) return;
+  const serverIds = new Set(serverPickups.map(pk => pk.id));
+
+  for (const [id, rec] of meshMap) {
+    if (!serverIds.has(id)) {
+      scene.remove(rec.obj);
+      rec.obj.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+      meshMap.delete(id);
+    }
+  }
+
+  const now = performance.now() / 1000;
+  for (const sp of serverPickups) {
+    if (!meshMap.has(sp.id)) {
+      const obj = buildPickupMesh(sp.kind || 'bean');
+      obj.position.set(sp.x, 0, sp.z);
+      scene.add(obj);
+      meshMap.set(sp.id, { obj, kind: sp.kind, t: now });
+    } else {
+      const rec = meshMap.get(sp.id);
+      const age = now - rec.t;
+      rec.obj.position.y = 0.3 + Math.sin(age * 4) * 0.08;
+      rec.obj.rotation.y = age * 2;
+    }
+  }
+}
+
+function handleMpEvent(msg) {
+  const { kind, data } = msg;
+  const myId = game.mpPlayerId;
+
+  if (kind === 'kill') {
+    sfx.impact?.();
+    if (data.x != null && data.z != null) {
+      spawnPoof(data.x, data.z, C.impact, 8);
+      const pos = new THREE.Vector3(data.x, 1.5, data.z);
+      game.floaters.spawn(pos, `+${data.score || 10}`, '#FFFFFF', false);
+    }
+    shakeCamera(camera, 0.05, 100);
+    if (game.mpHud && data.killedBy != null) {
+      const killerName = data.killedBy === myId ? `Player ${myId}` : `Player ${myId === 1 ? 2 : 1}`;
+      game.mpHud.addKillFeedEntry(killerName, data.kind || 'enemy');
+    }
+  } else if (kind === 'hurt') {
+    if (data.playerId === myId) {
+      flashDamage();
+      shakeCamera(camera, Math.min(0.15 + (data.damage || 10) * 0.005, 0.4), 300);
+      sfx.hurt?.();
+      if (game.player && data.hp != null) game.player.hp = data.hp;
+    } else {
+      // Partner got hurt — flash their HP bar
+      if (game.mpHud) {
+        const fill = document.getElementById('mp-partnerHpFill');
+        if (fill) {
+          fill.style.transition = 'none';
+          fill.style.background = '#FF4040';
+          setTimeout(() => {
+            fill.style.transition = 'width 0.15s ease, background 0.3s';
+            fill.style.background = '';
+          }, 200);
+        }
+      }
+    }
+  } else if (kind === 'pickup') {
+    sfx.pickup?.();
+    if (data.playerId === myId && game.player) {
+      if (data.kind === 'heal') {
+        game.floaters.spawn(new THREE.Vector3(game.player.x, 1.5, game.player.z), '+25 HP', '#FF5F5F', false);
+      } else if (data.kind === 'bean') {
+        game.floaters.spawn(new THREE.Vector3(game.player.x, 1.5, game.player.z), 'AMMO', '#FFD24D', false);
+      }
+    }
+  } else if (kind === 'wave') {
+    game.wave = data.wave || game.wave;
+    if (hud.waveNum) hud.waveNum.textContent = game.wave;
+    showBanner(`WAVE ${game.wave}`);
+    shakeCamera(camera, 0.12, 400);
+    sfx.waveStart?.();
+    if (game.mpHud) game.mpHud.showWaveBanner(`WAVE ${game.wave} 🍑`);
+  } else if (kind === 'level') {
+    showBanner(`LEVEL ${data.level}`);
+  } else if (kind === 'death') {
+    if (data.playerId === myId) {
+      game.state = 'gameover';
+      sfx.stopMusic?.();
+      sfx.death?.();
+      hud.goScore.textContent = game.score;
+      hud.goLevel.textContent = `Wave ${game.wave} (Co-op)`;
+      hud.goOverlay.classList.remove('hide');
+    } else {
+      if (game.mpHud) game.mpHud.showWaveBanner('💔 Partner Down!');
+      if (game.floaters && game.player) {
+        game.floaters.spawn(new THREE.Vector3(game.player.x, 3, game.player.z), 'PARTNER DOWN!', '#FF4040', true);
+      }
+    }
+  } else if (kind === 'gameover') {
+    if (game.state !== 'play') return;
+    game.state = 'gameover';
+    sfx.stopMusic?.();
+    sfx.death?.();
+    hud.goScore.textContent = data.score ?? game.score;
+    hud.goLevel.textContent = `Wave ${data.wave ?? game.wave} (Co-op)`;
+    if (hud.goTime) hud.goTime.textContent = data.survived ? `${Math.round(data.survived)}s` : '--';
+    hud.goOverlay.classList.remove('hide');
+  }
+}
+
+function handleMpPeerDisconnect() {
+  game.mpPeerDisconnected = true;
+  if (game.mpHud) game.mpHud.showPartnerDisconnected(true);
+  if (game.floaters && game.player) {
+    game.floaters.spawn(new THREE.Vector3(game.player.x, 3, game.player.z), 'PARTNER LEFT!', '#FF4040', true);
+  }
+  if (game.mpRemotePlayer) {
+    game.mpRemotePlayer.destroy();
+    game.mpRemotePlayer = null;
+  }
+  showBanner('SOLO MODE');
+}
+
+function cleanupMpState() {
+  if (game.mpInputInterval) { clearInterval(game.mpInputInterval); game.mpInputInterval = null; }
+  if (game.mpRemotePlayer) { game.mpRemotePlayer.destroy(); game.mpRemotePlayer = null; }
+  if (game.mpHud) { game.mpHud.destroy(); game.mpHud = null; }
+  if (game.mpEnemyMeshes) {
+    for (const [, rec] of game.mpEnemyMeshes) {
+      scene.remove(rec.obj);
+      rec.obj.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+      if (rec.shadowDisc) { scene.remove(rec.shadowDisc); rec.shadowDisc.geometry.dispose(); rec.shadowDisc.material.dispose(); }
+    }
+    game.mpEnemyMeshes.clear();
+  }
+  if (game.mpProjectileMeshes) {
+    for (const [, obj] of game.mpProjectileMeshes) {
+      scene.remove(obj);
+      obj.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+    }
+    game.mpProjectileMeshes.clear();
+  }
+  if (game.mpPickupMeshes) {
+    for (const [, rec] of game.mpPickupMeshes) {
+      scene.remove(rec.obj);
+      rec.obj.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+    }
+    game.mpPickupMeshes.clear();
+  }
+  if (game.mpNetwork) game.mpNetwork.disconnect?.();
+  game.mpMode = false;
+  game.mpNetwork = null;
+  game.mpPlayerId = null;
+  game.mpRoomCode = null;
+  game.mpInterpolator = null;
+  game.mpPeerDisconnected = false;
+}
+
 // ─── start / reset ────────────────────────────────────────────────────────────
 function resetScene() {
   for (const e of game.enemies) {
@@ -1952,6 +2437,8 @@ function resetScene() {
 }
 
 function startGame() {
+  // If returning from MP mode, clean up MP state first
+  if (game.mpMode) cleanupMpState();
   sfx.init();
   resetScene();
   resetGems();

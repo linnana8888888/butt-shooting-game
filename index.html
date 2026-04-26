@@ -539,6 +539,159 @@
     #mbReload, #mbStomp { width: min(48px, 12vw); height: min(48px, 12vw); }
     #bossbar { top: 44px; }
   }
+
+  /* ── Lobby overlay ───────────────────────────────────────────────── */
+  #lobby {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 120;
+    background: rgba(0,0,0,0.55);
+  }
+  #lobby.hide { display: none; }
+
+  .lobby-card {
+    background: var(--cream);
+    border: 6px solid var(--ink);
+    border-radius: 22px;
+    box-shadow: 0 8px 0 var(--ink);
+    padding: 30px 36px;
+    text-align: center;
+    max-width: 480px;
+    width: min(480px, 92vw);
+    pointer-events: auto;
+  }
+  .lobby-card h1 {
+    font-family: 'Fredoka One', Fredoka, sans-serif;
+    margin: 0 0 6px 0;
+    font-size: 34px;
+    color: var(--pink);
+    text-shadow: -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000;
+  }
+  .lobby-card h2 {
+    font-family: 'Fredoka One', Fredoka, sans-serif;
+    margin: 0 0 18px 0;
+    font-size: 18px;
+    color: var(--ink);
+    opacity: 0.7;
+    font-weight: 500;
+  }
+  .lobby-card p {
+    font-size: 15px;
+    line-height: 1.45;
+    margin: 6px 0;
+  }
+
+  .lobby-btn {
+    font-family: inherit;
+    font-weight: 700;
+    border: 4px solid var(--ink);
+    border-radius: 14px;
+    padding: 12px 26px;
+    font-size: 20px;
+    cursor: pointer;
+    box-shadow: 0 4px 0 var(--ink);
+    transition: transform 0.1s;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ink);
+  }
+  .lobby-btn:hover  { transform: translateY(-2px); }
+  .lobby-btn:active { transform: translateY(2px); box-shadow: 0 0 0 var(--ink); }
+  .lobby-btn.solo  { background: var(--peach); }
+  .lobby-btn.coop  { background: var(--pink); color: var(--cream); }
+  .lobby-btn.create { background: var(--sky); }
+  .lobby-btn.join   { background: var(--gold); }
+  .lobby-btn.ready  { background: var(--gold); }
+  .lobby-btn.back   { background: var(--cream); font-size: 15px; padding: 8px 18px; }
+
+  .lobby-btn-row {
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 18px;
+  }
+
+  .lobby-code-display {
+    font-family: 'Fredoka One', Fredoka, sans-serif;
+    font-size: 52px;
+    letter-spacing: 0.18em;
+    color: var(--pink);
+    text-shadow: -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000;
+    margin: 10px 0;
+    line-height: 1;
+  }
+
+  .lobby-code-input {
+    font-family: 'Fredoka One', Fredoka, sans-serif;
+    font-size: 32px;
+    letter-spacing: 0.22em;
+    text-align: center;
+    width: 160px;
+    border: 4px solid var(--ink);
+    border-radius: 12px;
+    padding: 8px 12px;
+    background: var(--cream);
+    color: var(--ink);
+    text-transform: uppercase;
+    box-shadow: 0 3px 0 var(--ink);
+    outline: none;
+  }
+  .lobby-code-input:focus { border-color: var(--pink); }
+
+  .lobby-player-list {
+    margin: 14px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .lobby-player-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(0,0,0,0.07);
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .lobby-player-row .pname { color: var(--ink); }
+  .lobby-player-row .pstatus { color: var(--pink); font-size: 14px; }
+
+  .lobby-error {
+    color: var(--red);
+    font-size: 13px;
+    margin-top: 8px;
+    min-height: 18px;
+    display: none;
+  }
+
+  .lobby-conn-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 12px;
+    opacity: 0.75;
+    margin-top: 14px;
+  }
+
+  .lobby-divider {
+    border: none;
+    border-top: 2px dashed rgba(42,26,14,0.2);
+    margin: 18px 0;
+  }
+
+  @media (max-width: 480px) {
+    .lobby-card { padding: 20px 16px; }
+    .lobby-card h1 { font-size: 26px; }
+    .lobby-btn { font-size: 17px; padding: 10px 18px; }
+    .lobby-code-display { font-size: 38px; }
+  }
 </style>
 </head>
 <body>
@@ -596,7 +749,80 @@
   <div id="crosshair"></div>
   <div id="dmg-flash" style="position:fixed;inset:0;background:rgba(255,0,0,0);pointer-events:none;transition:background 0.1s;z-index:50"></div>
 
-  <div id="title" class="overlay">
+  <!-- ── Lobby overlay (shown first, before title screen) ── -->
+  <div id="lobby">
+    <div class="lobby-card">
+
+      <!-- Screen 1: Mode Select -->
+      <div id="lobby-modeSelect">
+        <h1>🍑 BUTT SHOOTING</h1>
+        <h2>Choose your destiny</h2>
+        <p>Solo glory or shared shame?</p>
+        <div class="lobby-btn-row">
+          <button id="lobby-soloBtn" class="lobby-btn solo">🍑 SOLO</button>
+          <button id="lobby-coopBtn" class="lobby-btn coop">🍑🍑 CO-OP</button>
+        </div>
+        <div class="lobby-conn-bar">
+          <span id="lobby-connDot">🔴</span>
+          <span id="lobby-connText">Disconnected</span>
+        </div>
+      </div>
+
+      <!-- Screen 2: Room Screen -->
+      <div id="lobby-roomScreen" style="display:none">
+        <h1>🍑🍑 CO-OP</h1>
+        <h2>Find a butt buddy</h2>
+        <div class="lobby-btn-row">
+          <button id="lobby-createBtn" class="lobby-btn create">CREATE ROOM</button>
+        </div>
+        <hr class="lobby-divider">
+        <p style="font-size:13px;opacity:.7;margin-bottom:8px">— or enter a Butt Link code —</p>
+        <div style="display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap">
+          <input id="lobby-codeInput" class="lobby-code-input" maxlength="4" placeholder="ABCD" autocomplete="off" spellcheck="false">
+          <button id="lobby-joinBtn" class="lobby-btn join">JOIN</button>
+        </div>
+        <div id="lobby-roomError" class="lobby-error"></div>
+        <div class="lobby-btn-row">
+          <button id="lobby-roomBackBtn" class="lobby-btn back">← Back</button>
+        </div>
+        <div class="lobby-conn-bar">
+          <span id="lobby-connDot2">🔴</span>
+          <span id="lobby-connText2">Disconnected</span>
+        </div>
+      </div>
+
+      <!-- Screen 3: Waiting Screen -->
+      <div id="lobby-waitingScreen" style="display:none">
+        <h1>🍑🍑 LOBBY</h1>
+        <h2>Butt Link</h2>
+        <div class="lobby-code-display" id="lobby-roomCode">????</div>
+        <p style="font-size:12px;opacity:.6;margin-top:0">Share this code with your butt buddy</p>
+        <div class="lobby-player-list">
+          <div class="lobby-player-row">
+            <span class="pname">🍑 Player 1</span>
+            <span class="pstatus" id="lobby-player1status">Waiting...</span>
+          </div>
+          <div class="lobby-player-row">
+            <span class="pname">🍑 Player 2</span>
+            <span class="pstatus" id="lobby-player2status">Waiting...</span>
+          </div>
+        </div>
+        <div class="lobby-btn-row">
+          <button id="lobby-readyBtn" class="lobby-btn ready">READY UP</button>
+        </div>
+        <div class="lobby-btn-row">
+          <button id="lobby-waitBackBtn" class="lobby-btn back">← Leave Room</button>
+        </div>
+        <div class="lobby-conn-bar">
+          <span id="lobby-connDot3">🔴</span>
+          <span id="lobby-connText3">Disconnected</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="title" class="overlay hide">
     <div class="card">
       <h1>BUTT SHOOTING · v8</h1>
       <p>Three levels. Unlimited beans. Boss fight.</p>
@@ -704,6 +930,29 @@
         "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
         "three/examples/jsm/loaders/GLTFLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
       } }
+  </script>
+  <script type="module">
+    import { createLobby } from './lobby.mjs';
+
+    const lobby = createLobby({
+      onSinglePlayer() {
+        // Hide lobby, reveal title screen, let existing game flow take over
+        document.getElementById('title').classList.remove('hide');
+      },
+      onMultiplayerStart(network, playerId, roomCode) {
+        // Hide lobby, go straight to gameplay in co-op mode
+        // game.mjs should expose a startMultiplayer() or similar;
+        // for now we dispatch a custom event that game.mjs can listen for
+        document.dispatchEvent(new CustomEvent('lobby:multiplayerStart', {
+          detail: { network, playerId, roomCode }
+        }));
+      }
+    });
+
+    // Show lobby on load instead of title screen
+    window.addEventListener('DOMContentLoaded', () => lobby.show());
+    // Also expose globally so game.mjs can call lobby.setNetwork(net)
+    window.__lobby = lobby;
   </script>
   <script type="module" src="./game.mjs"></script>
 </body>
