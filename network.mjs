@@ -456,9 +456,9 @@ export function createRemotePlayer(THREE, ctx) {
 function _buildRemoteButt(THREE, ctx) {
   const { toon, withOutline, blobShadow } = ctx;
 
-  // Blue tint palette for the remote player
-  const BLUE_CHEEK = 0x5FA8E8;
-  const BLUE_CLEFT = 0x3A78C8;
+  // Warm tan palette for the remote player (slightly darker than P1)
+  const BLUE_CHEEK = 0xE8A87C;
+  const BLUE_CLEFT = 0xC47A52;
   const INK = 0x2A1A0E;
 
   const g = new THREE.Group();
